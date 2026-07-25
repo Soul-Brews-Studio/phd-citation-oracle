@@ -126,7 +126,7 @@ running. `graph` alone writes the SVG (plus a PNG when `sharp` happens to be ins
 
 ```bash
 ollama pull bge-m3 && ollama serve                                  # local
-cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787      # or cloud
+cd ψ/lab/citation/worker && wrangler dev --port 18787      # or cloud
 ```
 
 Force one with `CITATION_EMBED=ollama|worker|cf-rest`. The model id is recorded in the

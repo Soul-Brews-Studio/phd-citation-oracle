@@ -64,7 +64,7 @@ else
      Local (recommended — no token, uses your GPU):
        ollama pull bge-m3 && ollama serve
      Or the shared Cloudflare worker (do not spin up your own):
-       cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787
+       cd ψ/lab/citation/worker && wrangler dev --port 18787
 EOF
   WORKER_UP=0
 fi

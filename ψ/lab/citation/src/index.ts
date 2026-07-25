@@ -96,8 +96,8 @@ async function embedTexts(texts: string[]): Promise<number[][]> {
     body: JSON.stringify({ texts, model: EMBED_MODEL }),
   }).catch((error) => {
     throw new Error(
-      `Local embed worker unreachable at ${LOCAL_WORKER_URL} — reuse the shared one: ` +
-        `cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787 (${error instanceof Error ? error.message : String(error)})`,
+      `Local embed worker unreachable at ${LOCAL_WORKER_URL} — start the bundled one: ` +
+        `cd ψ/lab/citation/worker && wrangler dev --port 18787 (${error instanceof Error ? error.message : String(error)})`,
     );
   });
   if (!res.ok) throw new Error(`Local embed worker failed: ${res.status}`);
@@ -415,7 +415,7 @@ async function checkEmbedBackend(): Promise<string> {
     return (
       `  ✗ no embedding backend reachable: ${error instanceof Error ? error.message : String(error)}\n` +
       `      local option:  ollama pull ${OLLAMA_MODEL} && ollama serve\n` +
-      `      cloud option:  cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787`
+      `      cloud option:  cd ψ/lab/citation/worker && wrangler dev --port 18787`
     );
   }
 }

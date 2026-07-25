@@ -36,7 +36,7 @@ ollama serve                # ปกติ Ollama.app รันอยู่แ�
 **แบบ cloud (ถ้าไม่อยากลง model)**:
 
 ```bash
-cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787
+cd ψ/lab/citation/worker && wrangler dev --port 18787
 ```
 
 บังคับเลือกเองได้ด้วย `CITATION_EMBED=ollama|worker|cf-rest`

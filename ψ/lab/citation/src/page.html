@@ -353,7 +353,7 @@ async function runSearch(q) {
         esc(NODES[o.i].label) + '</span></div>').join('');
   } catch (err) {
     resultsEl.innerHTML = '<div class="rt" style="color:#d33">' + esc(err && err.message ? err.message : err) +
-      '<br>start the shared embed worker: <code>cd ~/.maw/plugins/cf-embed/worker &amp;&amp; wrangler dev --port 18787</code></div>';
+      '<br>start the bundled embed worker: <code>cd ψ/lab/citation/worker &amp;&amp; wrangler dev --port 18787</code></div>';
   }
 }
 document.getElementById('q').addEventListener('keydown', e => {

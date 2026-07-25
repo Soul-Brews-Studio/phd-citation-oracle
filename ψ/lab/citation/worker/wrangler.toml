@@ -1,0 +1,20 @@
+# citation embed worker — optional cloud embedding backend.
+#
+# No account_id here on purpose. This repo is public, and while an account ID is
+# not a credential it is still an identifier that does not need publishing.
+# wrangler picks the account from your own `wrangler login`; if you belong to more
+# than one, set CLOUDFLARE_ACCOUNT_ID in the environment instead.
+#
+#   cd ψ/lab/citation/worker
+#   wrangler login          # once
+#   wrangler dev --port 18787
+#
+# There is no token in this file and none is needed — the AI binding below is
+# granted by wrangler from your existing login.
+
+name = "citation-embed"
+main = "worker.js"
+compatibility_date = "2024-09-01"
+
+[ai]
+binding = "AI"
