@@ -8,9 +8,19 @@
     "allowImportingTsExtensions": true,
     "noEmit": true,
     "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": false,
+    "noImplicitOverride": true,
+    "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
     "allowSyntheticDefaultImports": true,
     "types": ["bun"]
-  }
+  },
+  // Only the real source. Without this, an editor can also index the installed
+  // copy under .maw/plugins/citation/src/ (same basename) and report phantom
+  // "duplicate implementation" errors that `tsc --noEmit` never sees.
+  "include": ["src"],
+  "exclude": ["node_modules", "data"]
 }

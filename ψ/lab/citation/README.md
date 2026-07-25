@@ -27,9 +27,46 @@ useless for finding the repo).
 maw citation status                          # corpus + arra backend + LanceDB + CF embed, one check
 maw citation index [corpus.jsonl]            # embed papers (default artifacts/literature_corpus.jsonl) → LanceDB
 maw citation search <query> [-k N] [--json]  # semantic search over indexed papers
-maw citation visualize [--port N] [--threshold N]   # serve the interactive 2D constellation (default :5556)
-maw citation graph [--threshold N] [--out P] [--html [P]]  # render the 2D network → PNG (+ portable interactive HTML)
+maw citation serve [--port N] [--threshold N] [--quiet]   # serve the interactive 2D constellation (:5556, verbose by default)
+maw citation graph [--threshold N] [--out P] [--html [P]] [--verbose]  # 2D network → PNG (+ portable interactive HTML)
 ```
+
+`serve` (alias: `visualize`) is **verbose by default** — it prints embedding model,
+t-SNE time, similarity max/mean, edge density, isolated papers, per-topic counts and
+the most-connected papers. `--quiet` trims it to the banner. If the port is busy
+(an earlier `serve` still running) it steps to the next free one and says so.
+
+### In the page
+
+| Interaction | What you get |
+|---|---|
+| hover a star | topic, full title, journal |
+| **click a star** | popup: full text, **distinctive terms** (what it's about), **nearest papers + the terms they share** (why they sit close), and **Open the original** links |
+| click a legend row | filter that cluster in/out |
+| search | embeds your query (shared worker) and highlights the top 10 |
+| drag / scroll | pan / zoom |
+
+**Why two papers sit close** — bge-m3 exposes no keywords, so the popup shows
+IDF-weighted term overlap as *evidence*, clearly labelled as a lexical proxy, not
+the cause. What gets embedded is stated in the popup too: `title + summary +
+thesis_relevance`, concatenated.
+
+**Open the original** — the corpus has no DOI/URL field yet, so links go out to
+Google Scholar / Semantic Scholar / Crossref by title. If a paper ever gains a
+`doi` or `url` field, the page links to it directly (already wired).
+
+### Architecture
+
+The interactive page is a **real HTML file**: [`src/page.html`](src/page.html).
+`src/index.ts` loads it with `Bun.file(join(import.meta.dir, "page.html"))` and
+substitutes the two font stacks plus one JSON data blob (`#cdata`). Edit the page
+directly — real syntax highlighting, no template-string escaping. `maw plugin
+install` copies it alongside the source, so it ships with the plugin.
+
+> Gotcha, learned the hard way: never write a placeholder's literal name in
+> `page.html`'s own comments — substitution is textual and the mention gets
+> replaced instead of the real token (it silently produced a blank page once).
+> The builder now fails loudly if any `{{` survives.
 
 **`graph` vs `visualize`** — same t-SNE layout, same similarity edges, same two-line
 labels (author+year, then the paper's name). `visualize` *serves* the interactive page

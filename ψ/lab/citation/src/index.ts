@@ -421,13 +421,31 @@ function tsne(X: number[][], opts: { perplexity?: number; iters?: number } = {})
   return Y;
 }
 
-function escapeHtml(s: string): string {
-  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+// The interactive page lives in a REAL html file next to this source
+// (src/page.html) — edit it directly, no escaping games. `maw plugin install`
+// copies the whole source tree, so it ships with the plugin; import.meta.dir
+// points at the installed copy (process.cwd() would not — see repoRoot()).
+async function loadPageTemplate(): Promise<{ text: string } | { error: string }> {
+  const path = join(import.meta.dir, "page.html");
+  const file = Bun.file(path);
+  if (!(await file.exists())) {
+    return { error: `page template missing: ${path} — re-run: maw plugin install ψ/lab/citation --force` };
+  }
+  return { text: await file.text() };
 }
 
 // Shared page builder: the interactive 2D constellation. `visualize` serves it;
 // `graph --html` writes it to a file so it opens/shares without a server running.
-type BuiltPage = { html: string; nodeCount: number; topicCount: number; edgeCount: number };
+type PageStats = {
+  maxSim: number;
+  meanSim: number;
+  tsneMs: number;
+  embedDim: number;
+  topics: Array<{ topic: string; count: number }>;
+  topDegree: Array<{ label: string; degree: number }>;
+  isolated: number;
+};
+type BuiltPage = { html: string; nodeCount: number; topicCount: number; edgeCount: number; stats: PageStats };
 
 async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { error: string }> {
   const db = await lancedb.connect(LANCEDB_DIR);
@@ -440,7 +458,9 @@ async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { 
   if (rows.length === 0) return { error: 'index is empty — run "maw citation index" first' };
 
   const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
+  const tsneStart = Date.now();
   const coords = tsne(vectors);
+  const tsneMs = Date.now() - tsneStart;
 
   // Same t-SNE + robust percentile scaling as `graph`, into a virtual canvas.
   const VW = 2000, VH = 1300, M = 90;
@@ -459,6 +479,11 @@ async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { 
     title: String(r.title), journal: String(r.journal), topic: String(r.topic),
     label: shortLabel(String(r.title)),   // author + year
     name: paperName(String(r.title)),     // the paper's descriptive name
+    detail: String(r.text ?? ""),         // full indexed text, for the click popup
+    // Not in the corpus today — the page links out by title until DOIs are
+    // resolved in. Passed through so a real link works the moment they exist.
+    doi: r.doi ? String(r.doi) : "",
+    url: r.url ? String(r.url) : "",
   }));
   const topics = [...new Set(nodes.map((n) => n.topic))].sort();
   const palette = ["#2ca88f", "#e8724c", "#5b74c9", "#d94f9a", "#7bc043", "#f2c53d", "#c9a66b", "#9aa0a6"];
@@ -466,166 +491,75 @@ async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { 
   const colorMap = Object.fromEntries(topics.map((t) => [t, colorFor(t)]));
 
   const edges: Array<{ i: number; j: number; s: number }> = [];
+  let maxSim = 0, simSum = 0, simCount = 0;
   for (let i = 0; i < vectors.length; i++) {
     for (let j = i + 1; j < vectors.length; j++) {
       const s = cosine(vectors[i], vectors[j]);
+      if (s > maxSim) maxSim = s;
+      simSum += s;
+      simCount++;
       if (s > threshold) edges.push({ i, j, s });
     }
   }
+  const degree = new Array(nodes.length).fill(0);
+  for (const e of edges) { degree[e.i]++; degree[e.j]++; }
+  const stats: PageStats = {
+    maxSim,
+    meanSim: simCount ? simSum / simCount : 0,
+    tsneMs,
+    embedDim: vectors[0]?.length ?? 0,
+    topics: topics.map((t) => ({ topic: t, count: nodes.filter((n) => n.topic === t).length })),
+    topDegree: degree
+      .map((d, i) => ({ label: nodes[i].label, degree: d }))
+      .sort((a, b) => b.degree - a.degree)
+      .slice(0, 5),
+    isolated: degree.filter((d) => d === 0).length,
+  };
 
-  const legendRows = topics
-    .map((t) => {
-      const n = nodes.filter((x) => x.topic === t).length;
-      return `<div class="item"><span class="sw" style="background:${colorFor(t)}"></span>${escapeHtml(t)} (${n})</div>`;
-    })
-    .join("");
+  // The page itself is a REAL html file (src/page.html) — loaded, not inlined.
+  const template = await loadPageTemplate();
+  if ("error" in template) return { error: template.error };
 
-  const html = `<!doctype html>
-<html><head><meta charset="utf-8"><title>citation constellation — ${nodes.length} papers</title>
-<style>
-  html,body{margin:0;height:100%;overflow:hidden;font-family:${FONT_SANS};background:#ffffff;color:#1a1a2e;}
-  #svg{display:block;width:100vw;height:100vh;cursor:grab;background:#ffffff;}
-  #svg.drag{cursor:grabbing;}
-  text{user-select:none;pointer-events:none;font-family:${FONT_SANS};}
-  #legend{position:fixed;top:16px;left:16px;background:rgba(255,255,255,.95);border:1px solid #d7dbe0;border-radius:10px;padding:12px 14px;font-size:13px;box-shadow:0 4px 20px rgba(0,0,0,.08);}
-  #legend h3{margin:0 0 8px;font-size:16px;font-family:${FONT_SERIF};}
-  #legend .item{display:flex;align-items:center;gap:7px;margin:4px 0;white-space:nowrap;}
-  #legend .sw{width:11px;height:11px;border-radius:50%;flex-shrink:0;}
-  #title{position:fixed;top:16px;left:50%;transform:translateX(-50%);font-size:22px;font-weight:700;color:#141428;text-align:center;font-family:${FONT_SERIF};}
-  #title small{display:block;font-size:12px;font-weight:400;color:#6b7280;margin-top:2px;}
-  #searchbar{position:fixed;top:64px;right:16px;display:flex;gap:6px;}
-  #searchbar input{width:280px;border:1px solid #cfd4da;border-radius:8px;padding:8px 12px;font-size:13px;outline:none;}
-  #searchbar input:focus{border-color:#5b74c9;}
-  #searchbar button{border:1px solid #cfd4da;border-radius:8px;background:#fff;cursor:pointer;padding:0 12px;color:#6b7280;}
-  #results{position:fixed;top:104px;right:16px;width:320px;max-height:60vh;overflow-y:auto;background:rgba(255,255,255,.97);border:1px solid #d7dbe0;border-radius:10px;padding:6px;font-size:12px;display:none;box-shadow:0 4px 20px rgba(0,0,0,.1);}
-  #results.show{display:block;}
-  #results .rt{color:#6b7280;padding:4px 8px;}
-  #results .ri{display:flex;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;}
-  #results .ri:hover{background:#eef1f8;}
-  #results .rs{color:#0f9d58;font-weight:700;font-variant-numeric:tabular-nums;}
-  #tip{position:fixed;max-width:420px;background:rgba(20,20,35,.96);color:#f1f3f8;border-radius:9px;padding:10px 13px;font-size:13px;line-height:1.5;pointer-events:none;display:none;z-index:20;box-shadow:0 8px 30px rgba(0,0,0,.35);}
-  #tip .tp{color:#93c5fd;font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
-  #tip .tj{color:#9aa3b2;font-size:12px;margin-top:5px;}
-  #hint{position:fixed;bottom:14px;left:16px;font-size:12px;color:#9aa0a6;}
-</style></head>
-<body>
-<div id="title">✦ Citation Constellation<small>bge-m3 · t-SNE · ${nodes.length} papers · ${edges.length} edges (sim &gt; ${threshold})</small></div>
-<div id="legend"><h3>Research Clusters</h3>${legendRows}</div>
-<div id="searchbar"><input id="q" placeholder="Search the literature… (Enter)"/><button id="clr">✕</button></div>
-<div id="results"></div>
-<div id="tip"></div>
-<div id="hint">drag to pan · scroll to zoom · hover a star for the paper · search to highlight</div>
-<svg id="svg" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="xMidYMid meet"></svg>
-<script>
-const NODES=${JSON.stringify(nodes)};
-const EDGES=${JSON.stringify(edges)};
-const VECTORS=${JSON.stringify(vectors)};
-const COLORS=${JSON.stringify(colorMap)};
-const WORKER=${JSON.stringify(LOCAL_WORKER_URL)};
-const MODEL=${JSON.stringify(EMBED_MODEL)};
-const VW=${VW}, VH=${VH};
-const SVGNS="http://www.w3.org/2000/svg";
-const svg=document.getElementById('svg');
-const tip=document.getElementById('tip');
-const resultsEl=document.getElementById('results');
-
-// edges
-const gEdges=document.createElementNS(SVGNS,'g');
-svg.appendChild(gEdges);
-for(const e of EDGES){
-  const a=NODES[e.i],b=NODES[e.j];
-  const ln=document.createElementNS(SVGNS,'line');
-  ln.setAttribute('x1',a.x);ln.setAttribute('y1',a.y);ln.setAttribute('x2',b.x);ln.setAttribute('y2',b.y);
-  ln.setAttribute('stroke','#9aa3ad');
-  ln.setAttribute('stroke-width',(0.6+(e.s-0.5)*5).toFixed(2));
-  ln.setAttribute('stroke-opacity',Math.min(0.5,(e.s-0.5)+0.12).toFixed(3));
-  gEdges.appendChild(ln);
-}
-// nodes + labels
-const gNodes=document.createElementNS(SVGNS,'g');
-svg.appendChild(gNodes);
-const circles=[];
-NODES.forEach((n,i)=>{
-  // two lines: author+year (bold), then the paper's name (lighter)
-  const above=(i%2===0);
-  const t=document.createElementNS(SVGNS,'text');
-  t.setAttribute('x',n.x);t.setAttribute('y',(above? (n.name? n.y-32 : n.y-14) : n.y+22));
-  t.setAttribute('text-anchor','middle');
-  t.setAttribute('paint-order','stroke');t.setAttribute('stroke','#ffffff');t.setAttribute('stroke-width','3.5');t.setAttribute('stroke-linejoin','round');
-  const l1=document.createElementNS(SVGNS,'tspan');
-  l1.setAttribute('x',n.x);l1.setAttribute('font-size','15');l1.setAttribute('font-weight','600');l1.setAttribute('fill','#1a1a2e');
-  l1.textContent=n.label;
-  t.appendChild(l1);
-  if(n.name){
-    const l2=document.createElementNS(SVGNS,'tspan');
-    l2.setAttribute('x',n.x);l2.setAttribute('dy','15');l2.setAttribute('font-size','12.5');l2.setAttribute('fill','#5b6270');
-    l2.textContent=n.name;
-    t.appendChild(l2);
+  const data = {
+    nodes, edges, vectors,
+    colors: colorMap,
+    worker: LOCAL_WORKER_URL,
+    model: EMBED_MODEL,
+    vw: VW, vh: VH,
+    threshold,
+  };
+  // `<` → \u003c so no "</script>" can ever terminate the data block early.
+  const dataJson = JSON.stringify(data).replace(/</g, "\\u003c");
+  // All substitutions are global: a stray mention of a placeholder anywhere in
+  // the template must not swallow the real one (a non-global data replace once
+  // injected into page.html's header comment and left the page blank).
+  const html = template.text
+    .replace(/\{\{FONT_SANS\}\}/g, FONT_SANS)
+    .replace(/\{\{FONT_SERIF\}\}/g, FONT_SERIF)
+    .replace(/\{\{DATA_JSON\}\}/g, () => dataJson);
+  if (html.includes("{{")) {
+    return { error: `page.html has unsubstituted placeholders — check src/page.html tokens` };
   }
-  gNodes.appendChild(t);
-  const c=document.createElementNS(SVGNS,'circle');
-  c.setAttribute('cx',n.x);c.setAttribute('cy',n.y);c.setAttribute('r','9');
-  c.setAttribute('fill',COLORS[n.topic]||'#94a3b8');c.setAttribute('stroke','#fff');c.setAttribute('stroke-width','1.5');
-  c.style.cursor='pointer';
-  c.addEventListener('mousemove',(ev)=>{
-    tip.style.display='block';tip.style.left=(ev.clientX+16)+'px';tip.style.top=(ev.clientY+16)+'px';
-    const sc=(activeScores&&activeScores.has(i))?('<div style="color:#34d399;font-size:11px;margin-bottom:3px;">similarity '+activeScores.get(i).toFixed(3)+'</div>'):'';
-    tip.innerHTML='<div class="tp">'+n.topic+'</div>'+sc+n.title.replace(/</g,'&lt;')+(n.journal?'<div class="tj">'+n.journal.replace(/</g,'&lt;')+'</div>':'');
-  });
-  c.addEventListener('mouseleave',()=>{tip.style.display='none';});
-  gNodes.appendChild(c);
-  circles.push(c);
-});
 
-// pan/zoom via viewBox
-let vb={x:0,y:0,w:VW,h:VH};
-function applyVB(){svg.setAttribute('viewBox',vb.x+' '+vb.y+' '+vb.w+' '+vb.h);}
-svg.addEventListener('wheel',(e)=>{
-  e.preventDefault();
-  const r=svg.getBoundingClientRect();
-  const mx=vb.x+((e.clientX-r.left)/r.width)*vb.w;
-  const my=vb.y+((e.clientY-r.top)/r.height)*vb.h;
-  const f=e.deltaY<0?0.87:1.15;
-  const nw=Math.max(120,Math.min(VW*3,vb.w*f)), nh=nw*(VH/VW);
-  vb.x=mx-((e.clientX-r.left)/r.width)*nw; vb.y=my-((e.clientY-r.top)/r.height)*nh; vb.w=nw; vb.h=nh;
-  applyVB();
-},{passive:false});
-let drag=null;
-svg.addEventListener('mousedown',(e)=>{drag={sx:e.clientX,sy:e.clientY,ox:vb.x,oy:vb.y};svg.classList.add('drag');});
-window.addEventListener('mousemove',(e)=>{
-  if(!drag)return;const r=svg.getBoundingClientRect();
-  vb.x=drag.ox-((e.clientX-drag.sx)/r.width)*vb.w; vb.y=drag.oy-((e.clientY-drag.sy)/r.height)*vb.h; applyVB();
-});
-window.addEventListener('mouseup',()=>{drag=null;svg.classList.remove('drag');});
-
-// search — embed query via shared worker, cosine vs stored vectors, highlight
-let activeScores=null;
-function cos(a,b){let d=0,na=0,nb=0;for(let i=0;i<a.length;i++){d+=a[i]*b[i];na+=a[i]*a[i];nb+=b[i]*b[i];}return d/(Math.sqrt(na)*Math.sqrt(nb)||1);}
-const dim='#dfe3e8';
-function reset(){activeScores=null;NODES.forEach((n,i)=>{circles[i].setAttribute('fill',COLORS[n.topic]||'#94a3b8');circles[i].setAttribute('r','9');});resultsEl.className='';resultsEl.innerHTML='';}
-async function runSearch(q){
-  resultsEl.className='show';resultsEl.innerHTML='<div class="rt">searching…</div>';
-  try{
-    const res=await fetch(WORKER+'/query-embed',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:q,model:MODEL})});
-    if(!res.ok)throw new Error('embed worker HTTP '+res.status);
-    const j=await res.json();const qv=j.data&&j.data[0];if(!qv)throw new Error('no vector');
-    const scored=VECTORS.map((v,i)=>({i,s:cos(qv,v)})).sort((a,b)=>b.s-a.s);
-    activeScores=new Map(scored.map(o=>[o.i,o.s]));
-    const top=scored.slice(0,10);const topSet=new Set(top.map(o=>o.i));
-    NODES.forEach((n,i)=>{
-      if(topSet.has(i)){circles[i].setAttribute('fill',COLORS[n.topic]||'#94a3b8');circles[i].setAttribute('r','13');}
-      else{circles[i].setAttribute('fill',dim);circles[i].setAttribute('r','7');}
-    });
-    resultsEl.innerHTML='<div class="rt">top '+top.length+' for "'+q+'"</div>'+top.map(o=>'<div class="ri" data-i="'+o.i+'"><span class="rs">'+o.s.toFixed(3)+'</span><span>'+NODES[o.i].label+'</span></div>').join('');
-  }catch(err){resultsEl.innerHTML='<div class="rt" style="color:#d33">'+(err&&err.message?err.message:err)+'</div>';}
+  return { html, nodeCount: nodes.length, topicCount: topics.length, edgeCount: edges.length, stats };
 }
-document.getElementById('q').addEventListener('keydown',(e)=>{if(e.key==='Enter'&&e.target.value.trim())runSearch(e.target.value.trim());});
-document.getElementById('clr').addEventListener('click',()=>{document.getElementById('q').value='';reset();});
-resultsEl.addEventListener('click',(e)=>{const it=e.target.closest('.ri');if(!it)return;const i=+it.dataset.i;const n=NODES[i];vb.w=520;vb.h=vb.w*(VH/VW);vb.x=n.x-vb.w/2;vb.y=n.y-vb.h/2;applyVB();});
-</script>
-</body></html>`;
 
-  return { html, nodeCount: nodes.length, topicCount: topics.length, edgeCount: edges.length };
+// Verbose report shared by `visualize` and `graph` (--verbose / -v).
+function verboseLines(s: PageStats, edgeCount: number, nodeCount: number, threshold: number): string[] {
+  const pairs = (nodeCount * (nodeCount - 1)) / 2;
+  return [
+    "",
+    "── verbose ──",
+    `  embeddings   ${EMBED_MODEL} · ${s.embedDim}-dim · ${nodeCount} papers`,
+    `  layout       t-SNE (PCA-init, deterministic) in ${s.tsneMs} ms`,
+    `  similarity   max ${s.maxSim.toFixed(3)} · mean ${s.meanSim.toFixed(3)} over ${pairs} pairs`,
+    `  edges        ${edgeCount} of ${pairs} pairs above ${threshold} (${((edgeCount / (pairs || 1)) * 100).toFixed(1)}%)`,
+    `  isolated     ${s.isolated} paper(s) with no edge at this threshold`,
+    "  topics",
+    ...s.topics.map((t) => `      ${String(t.count).padStart(3)}  ${t.topic}`),
+    "  most-connected",
+    ...s.topDegree.map((d) => `      ${String(d.degree).padStart(3)}  ${d.label}`),
+  ];
 }
 
 async function cmdVisualize(rest: string[]): Promise<PluginResult> {
@@ -637,15 +571,37 @@ async function cmdVisualize(rest: string[]): Promise<PluginResult> {
   const built = await buildConstellationHtml(threshold);
   if ("error" in built) return { ok: false, error: built.error };
 
-  Bun.serve({ port, fetch: () => new Response(built.html, { headers: { "content-type": "text/html" } }) });
+  // A previous `visualize` often still holds the port; step to the next free one
+  // instead of dying with EADDRINUSE.
+  let served = port;
+  for (let attempt = 0; ; attempt++) {
+    try {
+      Bun.serve({ port: served, fetch: () => new Response(built.html, { headers: { "content-type": "text/html" } }) });
+      break;
+    } catch (error) {
+      const busy = String(error).includes("EADDRINUSE") || String(error).includes("in use");
+      if (!busy || attempt >= 9) return { ok: false, error: `could not bind a port near ${port}: ${String(error)}` };
+      served++;
+    }
+  }
+  if (served !== port) console.log(`⚠ port ${port} busy (an earlier visualize is still running) — using ${served}`);
 
-  return {
-    ok: true,
-    output:
-      `✦ citation constellation (2D) — http://localhost:${port}\n` +
-      `${built.nodeCount} papers · ${built.topicCount} topics · ${built.edgeCount} edges (sim > ${threshold})\n` +
-      `drag to pan · scroll to zoom · hover a star · search to highlight\nCtrl+C to stop`,
-  };
+  // Verbose is the DEFAULT here: serving is interactive, so the stats are what
+  // you want to see. `--quiet`/`-q` trims it back to the banner.
+  const verbose = !(rest.includes("--quiet") || rest.includes("-q"));
+  const lines = [
+    `✦ citation constellation (2D) — http://localhost:${served}`,
+    `${built.nodeCount} papers · ${built.topicCount} topics · ${built.edgeCount} edges (sim > ${threshold})`,
+    `drag to pan · scroll to zoom · hover a star · click a star for full detail · search to highlight`,
+  ];
+  if (verbose) lines.push(...verboseLines(built.stats, built.edgeCount, built.nodeCount, threshold));
+  lines.push("Ctrl+C to stop");
+
+  // Print NOW, don't return it: this command never finishes (the server keeps
+  // running), and the host only flushes a returned `output` once the handler's
+  // process exits — so a returned banner stays invisible until Ctrl+C.
+  console.log(lines.join("\n"));
+  return { ok: true };
 }
 
 // ── graph — 2D labeled similarity network, rendered to PNG (the readable one) ──
@@ -790,6 +746,13 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
   // --html: also write the interactive page (same t-SNE + edges) as a portable
   // file — openable/shareable without keeping `visualize`'s server running.
   let htmlNote = "";
+  let verboseTail: string[] = [];
+  if (rest.includes("--verbose") || rest.includes("-v")) {
+    const built = await buildConstellationHtml(threshold);
+    if (!("error" in built)) {
+      verboseTail = verboseLines(built.stats, built.edgeCount, built.nodeCount, threshold);
+    }
+  }
   if (rest.includes("--html")) {
     const hIdx = rest.indexOf("--html");
     const nextArg = rest[hIdx + 1];
@@ -811,7 +774,8 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
         ? `no edges at this threshold — lower it: maw citation graph --threshold ${(maxSim - 0.05).toFixed(2)}`
         : edges.length > 400
           ? `dense — raise threshold for a cleaner graph: maw citation graph --threshold ${(threshold + 0.1).toFixed(2)}`
-          : `tune with --threshold N`),
+          : `tune with --threshold N`) +
+      (verboseTail.length ? `\n${verboseTail.join("\n")}` : ""),
   };
 }
 
@@ -824,7 +788,7 @@ Usage:
   maw citation status                        Corpus + arra backend + LanceDB + Cloudflare embed, one check
   maw citation index [corpus.jsonl]          Embed the paper corpus (default: ${DEFAULT_CORPUS}) into LanceDB
   maw citation search <query> [-k N] [--json]  Semantic search over indexed papers (default k=5)
-  maw citation visualize [--port N]          Serve the 3D constellation — papers as stars, topics as colors (default port 5556)
+  maw citation serve [--port N] [--threshold N] [--quiet]  Serve the interactive 2D constellation (default port 5556, verbose by default; alias: visualize)
   maw citation graph [--threshold N] [--out PATH] [--html [PATH]]  Render the 2D labeled similarity network → PNG (default artifacts/citation-network.png, threshold 0.5); --html also writes the interactive page
 
 Run from inside Soul-Brews-Studio/phd-citation-oracle.
@@ -840,7 +804,7 @@ Env:
 Roadmap: bib (JSONL → .bib keys), graph (citation edges). Not built yet — cite what's real.`;
 }
 
-const KNOWN_COMMANDS = ["status", "index", "search", "visualize", "graph"] as const;
+const KNOWN_COMMANDS = ["status", "index", "search", "serve", "visualize", "graph"] as const;
 
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -871,6 +835,7 @@ export async function handler(ctx: InvokeContext): Promise<PluginResult> {
       return cmdIndex(rest[0]);
     case "search":
       return cmdSearch(rest);
+    case "serve":       // `serve` and `visualize` are the same command
     case "visualize":
       return cmdVisualize(rest);
     case "graph":
@@ -887,12 +852,17 @@ export async function handler(ctx: InvokeContext): Promise<PluginResult> {
 
 export default handler;
 
+// Commands that start a server must NOT be exited — their Bun.serve() has to
+// keep the event loop alive. (Missing "serve" here made it print its banner and
+// die instantly, so nothing was ever listening.)
+const LONG_RUNNING = new Set<string>(["serve", "visualize"]);
+
 if (import.meta.main) {
   const args = process.argv.slice(2);
   const result = await handler({ source: "cli", args });
   if (result.output) console.log(result.output);
   if (result.error) console.error(result.error);
-  if (args[0] !== "visualize" || !result.ok) {
+  if (!LONG_RUNNING.has(args[0] ?? "") || !result.ok) {
     process.exit(result.ok ? 0 : 1);
   }
 }

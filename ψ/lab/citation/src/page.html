@@ -1,0 +1,370 @@
+<!doctype html>
+<!--
+  citation constellation — the interactive page.
+
+  A REAL html file: edit it directly (syntax highlighting, no escaping games).
+  src/index.ts loads it via Bun.file(join(import.meta.dir, "page.html")) and
+  substitutes three mustache placeholders — the FONT_SANS and FONT_SERIF stacks
+  in :root, and the data blob inside the #cdata script tag.
+  NOTE: never write those placeholder names literally in this comment — the
+  substitution is textual, so a mention up here would be replaced instead of
+  the real one below (it silently broke the page once).
+  Everything else — layout, interaction, interpretability — lives here.
+-->
+<html lang="en"><head><meta charset="utf-8">
+<title>citation constellation</title>
+<style>
+  :root{ --sans:{{FONT_SANS}}; --serif:{{FONT_SERIF}}; --ink:#1a1a2e; --muted:#6b7280; --line:#d7dbe0; }
+  html,body{margin:0;height:100%;overflow:hidden;font-family:var(--sans);background:#fff;color:var(--ink);}
+  #svg{display:block;width:100vw;height:100vh;cursor:grab;background:#fff;}
+  #svg.drag{cursor:grabbing;}
+  text{user-select:none;pointer-events:none;font-family:var(--sans);}
+
+  #title{position:fixed;top:16px;left:50%;transform:translateX(-50%);font-size:22px;font-weight:700;
+    color:#141428;text-align:center;font-family:var(--serif);}
+  #title small{display:block;font-size:12px;font-weight:400;color:var(--muted);margin-top:2px;font-family:var(--sans);}
+
+  #legend{position:fixed;top:16px;left:16px;background:rgba(255,255,255,.95);border:1px solid var(--line);
+    border-radius:10px;padding:12px 14px;font-size:13px;box-shadow:0 4px 20px rgba(0,0,0,.08);}
+  #legend h3{margin:0 0 8px;font-size:16px;font-family:var(--serif);}
+  #legend .item{display:flex;align-items:center;gap:7px;margin:4px 0;white-space:nowrap;cursor:pointer;}
+  #legend .item.off{opacity:.35;}
+  #legend .sw{width:11px;height:11px;border-radius:50%;flex-shrink:0;}
+
+  #searchbar{position:fixed;top:64px;right:16px;display:flex;gap:6px;}
+  #searchbar input{width:280px;border:1px solid #cfd4da;border-radius:8px;padding:8px 12px;font-size:13px;outline:none;font-family:var(--sans);}
+  #searchbar input:focus{border-color:#5b74c9;}
+  #searchbar button{border:1px solid #cfd4da;border-radius:8px;background:#fff;cursor:pointer;padding:0 12px;color:var(--muted);}
+  #results{position:fixed;top:104px;right:16px;width:330px;max-height:60vh;overflow-y:auto;background:rgba(255,255,255,.97);
+    border:1px solid var(--line);border-radius:10px;padding:6px;font-size:12px;display:none;box-shadow:0 4px 20px rgba(0,0,0,.1);}
+  #results.show{display:block;}
+  #results .rt{color:var(--muted);padding:4px 8px;}
+  #results .ri{display:flex;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;}
+  #results .ri:hover{background:#eef1f8;}
+  #results .rs{color:#0f9d58;font-weight:700;font-variant-numeric:tabular-nums;}
+
+  #tip{position:fixed;max-width:420px;background:rgba(20,20,35,.96);color:#f1f3f8;border-radius:9px;padding:10px 13px;
+    font-size:13px;line-height:1.5;pointer-events:none;display:none;z-index:20;box-shadow:0 8px 30px rgba(0,0,0,.35);}
+  #tip .tp{color:#93c5fd;font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
+  #tip .tj{color:#9aa3b2;font-size:12px;margin-top:5px;}
+  #hint{position:fixed;bottom:14px;left:16px;font-size:12px;color:#9aa0a6;}
+
+  #shade{position:fixed;inset:0;background:rgba(16,18,28,.45);display:none;z-index:30;}
+  #shade.show{display:block;}
+  #modal{position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);width:min(680px,92vw);max-height:82vh;
+    overflow-y:auto;background:#fff;border:1px solid var(--line);border-radius:14px;padding:26px 30px;z-index:31;
+    display:none;box-shadow:0 24px 70px rgba(0,0,0,.3);}
+  #modal.show{display:block;}
+  #modal .mtopic{display:inline-block;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;
+    color:#fff;padding:3px 9px;border-radius:20px;}
+  #modal h2{font-family:var(--serif);font-size:25px;line-height:1.25;margin:12px 0 4px;color:#141428;}
+  #modal .mname{font-size:16px;color:#4b5563;margin-bottom:12px;}
+  #modal .mjournal{font-size:13px;color:var(--muted);border-top:1px solid #eceff3;padding-top:12px;margin-bottom:14px;}
+  #modal p{font-size:14px;line-height:1.65;color:#33373d;margin:0 0 11px;}
+  #modal h4{font-size:12px;text-transform:uppercase;letter-spacing:.05em;color:#8a9099;margin:20px 0 8px;}
+  #modal .chips{display:flex;flex-wrap:wrap;gap:6px;}
+  #modal .chip{font-size:12px;background:#eef1f8;color:#3b4252;border:1px solid #dde2ec;border-radius:20px;padding:3px 10px;}
+  #modal .nb{display:flex;gap:9px;align-items:baseline;padding:6px 8px;border-radius:6px;cursor:pointer;font-size:13px;}
+  #modal .nb:hover{background:#eef1f8;}
+  #modal .nbs{color:#0f9d58;font-weight:700;font-variant-numeric:tabular-nums;}
+  #modal .nbt{display:block;}
+  #modal .nbw{display:block;font-size:11.5px;color:#8a9099;margin-top:2px;}
+  #modal .links{display:flex;flex-wrap:wrap;gap:8px;}
+  #modal .links a{font-size:12.5px;text-decoration:none;color:#2f4fa8;background:#f2f5fc;border:1px solid #dbe3f5;
+    border-radius:8px;padding:6px 11px;}
+  #modal .links a:hover{background:#e6ecfa;border-color:#b9c7ee;}
+  #modal .links a.doi{color:#fff;background:#2f4fa8;border-color:#2f4fa8;}
+  #modal .prov{margin-top:22px;padding-top:13px;border-top:1px solid #eceff3;font-size:11.5px;line-height:1.6;color:#7c828b;}
+  #modal .mclose{position:absolute;top:14px;right:16px;border:none;background:none;font-size:24px;color:#9aa0a6;cursor:pointer;line-height:1;}
+  #modal .mclose:hover{color:#33373d;}
+</style></head>
+<body>
+<div id="title"></div>
+<div id="legend"><h3>Research Clusters</h3><div id="legend-items"></div></div>
+<div id="searchbar"><input id="q" placeholder="Search the literature… (Enter)"/><button id="clr" title="Clear">✕</button></div>
+<div id="results"></div>
+<div id="tip"></div>
+<div id="hint">drag to pan · scroll to zoom · hover a star · <b>click a star for full detail</b> · click a legend row to filter · search to highlight</div>
+<div id="shade"></div>
+<div id="modal"></div>
+<svg id="svg" preserveAspectRatio="xMidYMid meet"></svg>
+
+<script id="cdata" type="application/json">{{DATA_JSON}}</script>
+<script>
+const D = JSON.parse(document.getElementById('cdata').textContent);
+const NODES = D.nodes, EDGES = D.edges, VECTORS = D.vectors, COLORS = D.colors;
+const WORKER = D.worker, MODEL = D.model, VW = D.vw, VH = D.vh, THRESHOLD = D.threshold;
+const SVGNS = "http://www.w3.org/2000/svg";
+const svg = document.getElementById('svg');
+const tip = document.getElementById('tip');
+const resultsEl = document.getElementById('results');
+svg.setAttribute('viewBox', '0 0 ' + VW + ' ' + VH);
+
+function esc(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function cos(a,b){ let d=0,na=0,nb=0; for(let i=0;i<a.length;i++){ d+=a[i]*b[i]; na+=a[i]*a[i]; nb+=b[i]*b[i]; } return d/(Math.sqrt(na)*Math.sqrt(nb)||1); }
+
+// ── header + legend ───────────────────────────────────────────────────────────
+document.getElementById('title').innerHTML =
+  '✦ Citation Constellation<small>' + esc(MODEL) + ' · t-SNE · ' + NODES.length + ' papers · ' +
+  EDGES.length + ' edges (cosine &gt; ' + THRESHOLD + ')</small>';
+
+const topicCounts = {};
+for (const n of NODES) topicCounts[n.topic] = (topicCounts[n.topic] || 0) + 1;
+const topics = Object.keys(topicCounts).sort();
+const hidden = new Set();
+document.getElementById('legend-items').innerHTML = topics.map(t =>
+  '<div class="item" data-t="' + esc(t) + '"><span class="sw" style="background:' + (COLORS[t]||'#94a3b8') + '"></span>' +
+  esc(t) + ' (' + topicCounts[t] + ')</div>').join('');
+
+// ── interpretability: WHY are two dots close? ─────────────────────────────────
+// bge-m3 exposes no keywords, so we surface EVIDENCE: IDF-weighted term overlap
+// over the same text that was embedded. Rare shared terms explain a link; common
+// ones don't. A lexical proxy for the semantic match — not its cause.
+const STOP = new Set(('a about above after again against all am an and any are as at be because been before being below ' +
+  'between both but by can cannot could did do does doing down during each few for from further had has have having he ' +
+  'her here hers him his how i if in into is it its itself me more most my no nor not of off on once only or other our ' +
+  'ours out over own same she should so some such than that the their theirs them then there these they this those ' +
+  'through to too under until up very was we were what when where which while who whom why will with would you your ' +
+  'yours using used use also may might shown show study studies results result paper papers based approach method ' +
+  'methods data dataset new high low three two one').split(' '));
+
+const TOKENS = NODES.map(n => {
+  const words = ((n.detail || '') + ' ' + (n.title || '')).toLowerCase().match(/[a-z][a-z0-9.\-]{2,}/g) || [];
+  const tf = new Map();
+  for (const w of words) {
+    const k = w.replace(/^[.\-]+|[.\-]+$/g, '');
+    if (k.length < 3 || STOP.has(k)) continue;
+    tf.set(k, (tf.get(k) || 0) + 1);
+  }
+  return tf;
+});
+const DF = new Map();
+for (const tf of TOKENS) for (const k of tf.keys()) DF.set(k, (DF.get(k) || 0) + 1);
+const idf = w => Math.log(TOKENS.length / ((DF.get(w) || 0) + 0.5));
+
+/** A paper's own most distinctive terms — "what is this dot about". */
+function keyTerms(i, k) {
+  return [...TOKENS[i].entries()]
+    .map(([w, f]) => ({ w, score: (1 + Math.log(f)) * idf(w) }))
+    .filter(o => o.score > 0).sort((a, b) => b.score - a.score).slice(0, k).map(o => o.w);
+}
+/** Terms BOTH papers share, rarest first — evidence for why they sit together. */
+function sharedTerms(i, j, k) {
+  const out = [];
+  for (const w of TOKENS[i].keys()) if (TOKENS[j].has(w)) out.push({ w, score: idf(w) });
+  return out.sort((a, b) => b.score - a.score).slice(0, k).map(o => o.w);
+}
+
+// ── "open the original" links ─────────────────────────────────────────────────
+// The corpus carries no DOI/URL (fields: id/title/journal/topic/summary/
+// thesis_relevance), so a direct publisher link isn't available for most papers.
+// Until DOIs are resolved into the corpus, offer one-click lookups by title —
+// and use a real link the moment a node has .doi or .url.
+function linksFor(n) {
+  const q = encodeURIComponent(String(n.title || '').replace(/\s+--\s+/g, ' ').trim());
+  const out = [];
+  if (n.doi) {
+    const doi = String(n.doi).replace(/^https?:\/\/(dx\.)?doi\.org\//, '');
+    out.push('<a class="doi" target="_blank" rel="noopener" href="https://doi.org/' + encodeURIComponent(doi) + '">Publisher · doi:' + esc(doi) + '</a>');
+  }
+  if (n.url) out.push('<a class="doi" target="_blank" rel="noopener" href="' + esc(n.url) + '">Open source link</a>');
+  out.push('<a target="_blank" rel="noopener" href="https://scholar.google.com/scholar?q=' + q + '">Google Scholar ↗</a>');
+  out.push('<a target="_blank" rel="noopener" href="https://www.semanticscholar.org/search?q=' + q + '">Semantic Scholar ↗</a>');
+  out.push('<a target="_blank" rel="noopener" href="https://search.crossref.org/search/works?q=' + q + '&from_ui=yes">Crossref (find DOI) ↗</a>');
+  const note = (n.doi || n.url) ? '' :
+    '<div class="nbw" style="margin-top:6px">no DOI in the corpus for this paper — these search by title</div>';
+  return '<div class="links">' + out.join('') + '</div>' + note;
+}
+
+// ── draw: edges, then labelled nodes ──────────────────────────────────────────
+const gEdges = document.createElementNS(SVGNS, 'g'); svg.appendChild(gEdges);
+const lines = EDGES.map(e => {
+  const a = NODES[e.i], b = NODES[e.j];
+  const ln = document.createElementNS(SVGNS, 'line');
+  ln.setAttribute('x1', a.x); ln.setAttribute('y1', a.y);
+  ln.setAttribute('x2', b.x); ln.setAttribute('y2', b.y);
+  ln.setAttribute('stroke', '#9aa3ad');
+  ln.setAttribute('stroke-width', (0.6 + (e.s - THRESHOLD) * 6).toFixed(2));
+  ln.setAttribute('stroke-opacity', Math.min(0.5, (e.s - THRESHOLD) + 0.12).toFixed(3));
+  gEdges.appendChild(ln);
+  return ln;
+});
+
+const gNodes = document.createElementNS(SVGNS, 'g'); svg.appendChild(gNodes);
+const circles = [], labels = [];
+NODES.forEach((n, i) => {
+  // two lines: author + year (bold), then the paper's name (lighter)
+  const above = (i % 2 === 0);
+  const t = document.createElementNS(SVGNS, 'text');
+  t.setAttribute('x', n.x);
+  t.setAttribute('y', above ? (n.name ? n.y - 32 : n.y - 14) : n.y + 22);
+  t.setAttribute('text-anchor', 'middle');
+  t.setAttribute('paint-order', 'stroke');
+  t.setAttribute('stroke', '#ffffff'); t.setAttribute('stroke-width', '3.5'); t.setAttribute('stroke-linejoin', 'round');
+  const l1 = document.createElementNS(SVGNS, 'tspan');
+  l1.setAttribute('x', n.x); l1.setAttribute('font-size', '15'); l1.setAttribute('font-weight', '600'); l1.setAttribute('fill', '#1a1a2e');
+  l1.textContent = n.label;
+  t.appendChild(l1);
+  if (n.name) {
+    const l2 = document.createElementNS(SVGNS, 'tspan');
+    l2.setAttribute('x', n.x); l2.setAttribute('dy', '15'); l2.setAttribute('font-size', '12.5'); l2.setAttribute('fill', '#5b6270');
+    l2.textContent = n.name;
+    t.appendChild(l2);
+  }
+  gNodes.appendChild(t); labels.push(t);
+
+  const c = document.createElementNS(SVGNS, 'circle');
+  c.setAttribute('cx', n.x); c.setAttribute('cy', n.y); c.setAttribute('r', '9');
+  c.setAttribute('fill', COLORS[n.topic] || '#94a3b8');
+  c.setAttribute('stroke', '#fff'); c.setAttribute('stroke-width', '1.5');
+  c.style.cursor = 'pointer';
+  c.addEventListener('mousemove', ev => {
+    tip.style.display = 'block';
+    tip.style.left = (ev.clientX + 16) + 'px'; tip.style.top = (ev.clientY + 16) + 'px';
+    const sc = (activeScores && activeScores.has(i))
+      ? '<div style="color:#34d399;font-size:11px;margin-bottom:3px;">similarity ' + activeScores.get(i).toFixed(3) + '</div>' : '';
+    tip.innerHTML = '<div class="tp">' + esc(n.topic) + '</div>' + sc + esc(n.title) +
+      (n.journal ? '<div class="tj">' + esc(n.journal) + '</div>' : '') +
+      '<div class="tj" style="color:#7c8797">click for full detail</div>';
+  });
+  c.addEventListener('mouseleave', () => { tip.style.display = 'none'; });
+  c.addEventListener('click', ev => { ev.stopPropagation(); openDetail(i); });
+  gNodes.appendChild(c); circles.push(c);
+});
+
+// ── click → popup detail ──────────────────────────────────────────────────────
+const shade = document.getElementById('shade');
+const modal = document.getElementById('modal');
+function closeDetail(){ shade.className = ''; modal.className = ''; modal.innerHTML = ''; }
+function openDetail(i) {
+  const n = NODES[i];
+  const paras = (n.detail || '').split(/\n{2,}/).map(s => s.trim()).filter(Boolean);
+  const body = paras.slice(1);   // paragraph 0 is the title itself
+  const near = VECTORS.map((v, j) => ({ j, s: cos(VECTORS[i], v) }))
+    .filter(o => o.j !== i).sort((a, b) => b.s - a.s).slice(0, 5);
+  const deg = EDGES.filter(e => e.i === i || e.j === i).length;
+
+  modal.innerHTML =
+    '<button class="mclose" title="Close (Esc)">×</button>' +
+    '<span class="mtopic" style="background:' + (COLORS[n.topic] || '#94a3b8') + '">' + esc(n.topic) + '</span>' +
+    '<h2>' + esc(n.label) + '</h2>' +
+    (n.name ? '<div class="mname">' + esc(n.name) + '</div>' : '') +
+    '<div class="mjournal">' + (n.journal ? esc(n.journal) + ' · ' : '') + deg + ' edge' + (deg === 1 ? '' : 's') + ' at this threshold</div>' +
+    (body.length ? body.map(p => '<p>' + esc(p) + '</p>').join('') : '<p style="color:#8a9099">No summary text indexed for this paper.</p>') +
+    '<h4>Open the original</h4>' + linksFor(n) +
+    '<h4>Distinctive terms — what this paper is about</h4>' +
+    '<div class="chips">' + keyTerms(i, 10).map(w => '<span class="chip">' + esc(w) + '</span>').join('') + '</div>' +
+    '<h4>Nearest papers — and why they sit close</h4>' +
+    near.map(o => {
+      const sh = sharedTerms(i, o.j, 5);
+      return '<div class="nb" data-j="' + o.j + '"><span class="nbs">' + o.s.toFixed(3) + '</span><span>' +
+        '<span class="nbt">' + esc(NODES[o.j].label) + (NODES[o.j].name ? ' — ' + esc(NODES[o.j].name) : '') + '</span>' +
+        (sh.length ? '<span class="nbw">shared: ' + sh.map(esc).join(' · ') + '</span>' : '') + '</span></div>';
+    }).join('') +
+    '<div class="prov"><b>How this was computed</b> — embedded text: <i>title + summary + thesis_relevance</i> ' +
+    '(the corpus fields, concatenated) → <b>' + esc(MODEL) + '</b>, ' + (VECTORS[0] || []).length + '-dim. ' +
+    'Distance = cosine between those vectors; position = t-SNE of them; an edge is drawn above the similarity threshold. ' +
+    'The embedding exposes no keywords, so the terms above are IDF-weighted lexical overlap — <i>evidence</i> for a match, not its cause.</div>';
+
+  shade.className = 'show'; modal.className = 'show';
+  modal.querySelector('.mclose').addEventListener('click', closeDetail);
+  modal.querySelectorAll('.nb').forEach(el => el.addEventListener('click', () => {
+    const j = +el.dataset.j, t = NODES[j];
+    vb.w = 520; vb.h = vb.w * (VH / VW); vb.x = t.x - vb.w / 2; vb.y = t.y - vb.h / 2; applyVB();
+    openDetail(j);
+  }));
+}
+shade.addEventListener('click', closeDetail);
+window.addEventListener('keydown', e => { if (e.key === 'Escape') closeDetail(); });
+
+// ── pan / zoom via viewBox ────────────────────────────────────────────────────
+let vb = { x: 0, y: 0, w: VW, h: VH };
+function applyVB(){ svg.setAttribute('viewBox', vb.x + ' ' + vb.y + ' ' + vb.w + ' ' + vb.h); }
+svg.addEventListener('wheel', e => {
+  e.preventDefault();
+  const r = svg.getBoundingClientRect();
+  const mx = vb.x + ((e.clientX - r.left) / r.width) * vb.w;
+  const my = vb.y + ((e.clientY - r.top) / r.height) * vb.h;
+  const f = e.deltaY < 0 ? 0.87 : 1.15;
+  const nw = Math.max(120, Math.min(VW * 3, vb.w * f)), nh = nw * (VH / VW);
+  vb.x = mx - ((e.clientX - r.left) / r.width) * nw;
+  vb.y = my - ((e.clientY - r.top) / r.height) * nh;
+  vb.w = nw; vb.h = nh; applyVB();
+}, { passive: false });
+let drag = null;
+svg.addEventListener('mousedown', e => { drag = { sx: e.clientX, sy: e.clientY, ox: vb.x, oy: vb.y }; svg.classList.add('drag'); });
+window.addEventListener('mousemove', e => {
+  if (!drag) return;
+  const r = svg.getBoundingClientRect();
+  vb.x = drag.ox - ((e.clientX - drag.sx) / r.width) * vb.w;
+  vb.y = drag.oy - ((e.clientY - drag.sy) / r.height) * vb.h;
+  applyVB();
+});
+window.addEventListener('mouseup', () => { drag = null; svg.classList.remove('drag'); });
+
+// ── legend filter — click a cluster to dim it ─────────────────────────────────
+function applyFilter() {
+  NODES.forEach((n, i) => {
+    const off = hidden.has(n.topic);
+    circles[i].style.display = off ? 'none' : '';
+    labels[i].style.display = off ? 'none' : '';
+  });
+  EDGES.forEach((e, k) => {
+    const off = hidden.has(NODES[e.i].topic) || hidden.has(NODES[e.j].topic);
+    lines[k].style.display = off ? 'none' : '';
+  });
+}
+document.querySelectorAll('#legend-items .item').forEach(el => el.addEventListener('click', () => {
+  const t = el.dataset.t;
+  if (hidden.has(t)) { hidden.delete(t); el.classList.remove('off'); }
+  else { hidden.add(t); el.classList.add('off'); }
+  applyFilter();
+}));
+
+// ── search — embed the query via the shared worker, rank by cosine ────────────
+let activeScores = null;
+const DIM = '#dfe3e8';
+function reset() {
+  activeScores = null;
+  NODES.forEach((n, i) => { circles[i].setAttribute('fill', COLORS[n.topic] || '#94a3b8'); circles[i].setAttribute('r', '9'); });
+  resultsEl.className = ''; resultsEl.innerHTML = '';
+}
+async function runSearch(q) {
+  resultsEl.className = 'show';
+  resultsEl.innerHTML = '<div class="rt">searching…</div>';
+  try {
+    const res = await fetch(WORKER + '/query-embed', {
+      method: 'POST', headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text: q, model: MODEL }),
+    });
+    if (!res.ok) throw new Error('embed worker HTTP ' + res.status);
+    const j = await res.json();
+    const qv = j.data && j.data[0];
+    if (!qv) throw new Error('embed worker returned no vector');
+    const scored = VECTORS.map((v, i) => ({ i, s: cos(qv, v) })).sort((a, b) => b.s - a.s);
+    activeScores = new Map(scored.map(o => [o.i, o.s]));
+    const top = scored.slice(0, 10), topSet = new Set(top.map(o => o.i));
+    NODES.forEach((n, i) => {
+      if (topSet.has(i)) { circles[i].setAttribute('fill', COLORS[n.topic] || '#94a3b8'); circles[i].setAttribute('r', '13'); }
+      else { circles[i].setAttribute('fill', DIM); circles[i].setAttribute('r', '7'); }
+    });
+    resultsEl.innerHTML = '<div class="rt">top ' + top.length + ' for "' + esc(q) + '"</div>' +
+      top.map(o => '<div class="ri" data-i="' + o.i + '"><span class="rs">' + o.s.toFixed(3) + '</span><span>' +
+        esc(NODES[o.i].label) + '</span></div>').join('');
+  } catch (err) {
+    resultsEl.innerHTML = '<div class="rt" style="color:#d33">' + esc(err && err.message ? err.message : err) +
+      '<br>start the shared embed worker: <code>cd ~/.maw/plugins/cf-embed/worker &amp;&amp; wrangler dev --port 18787</code></div>';
+  }
+}
+document.getElementById('q').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && e.target.value.trim()) runSearch(e.target.value.trim());
+});
+document.getElementById('clr').addEventListener('click', () => { document.getElementById('q').value = ''; reset(); });
+resultsEl.addEventListener('click', e => {
+  const it = e.target.closest('.ri'); if (!it) return;
+  const i = +it.dataset.i, n = NODES[i];
+  vb.w = 520; vb.h = vb.w * (VH / VW); vb.x = n.x - vb.w / 2; vb.y = n.y - vb.h / 2; applyVB();
+  openDetail(i);
+});
+</script>
+</body></html>
