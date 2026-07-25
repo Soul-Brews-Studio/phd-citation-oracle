@@ -15,3 +15,7 @@
 node_modules/
 ψ/lab/**/node_modules/
 ψ/lab/**/data/
+
+# codex team runtime — auth symlinks, session logs, sqlite state. NEVER commit.
+.codex/
+.codex-team/
