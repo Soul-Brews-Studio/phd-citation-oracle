@@ -2189,7 +2189,11 @@ async function cmdBib(rest: string[]): Promise<PluginResult> {
   const withheld = entries.filter((e) => !e.complete);
   const noDoi = complete.filter((e) => e.missing.includes("doi"));
 
-  const sortKey = (e: Entry) => (byTopic ? `${e.topic} ${e.key}` : e.key);
+  // \u0000 written as an ESCAPE, never as a raw NUL byte: a literal one makes
+  // ripgrep classify this file as binary and silently stop reporting matches.
+  // It sorts before every printable character, which is what makes it a safe
+  // separator for a compound key.
+  const sortKey = (e: Entry) => (byTopic ? `${e.topic}\u0000${e.key}` : e.key);
   complete.sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
 
   const header = [
