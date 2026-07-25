@@ -1,6 +1,6 @@
 # บทที่ 4: โครงสร้าง — ของอยู่ไหน อะไรคือของจริง
 
-`.bib` ผิด ค้นหามั่ว แก้ที่ไหน — คำตอบเดียว: แก้การ์ดใน `ψ/papers/` เสมอ JSONL/store derive ได้ ลบสร้างใหม่ตลอด
+`.bib` ผิด ค้นหามั่ว แก้ที่การ์ดใน `ψ/papers/` เสมอ — JSONL/store derive ได้ ลบสร้างใหม่ตลอด
 
 ## 4.1 แผนที่ repo
 
@@ -27,16 +27,16 @@ paper-card/            research-ingest/
 |---|---|
 | `ψ/papers/` | การ์ด paper 62 ใบ — **source of truth** |
 | `ψ/lab/citation/` | โค้ด plugin (`src/index.ts`, `package.json`) |
-| `artifacts/` | ผลผลิต — JSONL นำเข้า, `.bib`, กราฟ PNG/SVG/HTML |
-| `bin/citation` | ทางเข้าแบบไม่ต้องมี maw |
+| `artifacts/` | JSONL นำเข้า, `.bib`, กราฟ PNG/SVG/HTML |
+| `bin/citation` | ทางเข้าไม่ต้องมี maw |
 
 `.claude/skills/` คนละชั้น — ใช้หาเนื้อหาใหม่ป้อนคอร์ปัส:
 
 | skill | ทำอะไร |
 |---|---|
-| `gemini-deep-research` | เขียน brief/prompt ให้ tool นอกหาให้ |
-| `research-ingest` | รับรายงานกลับ ตรวจ DOI กับ Crossref ก่อนสร้างการ์ด+index |
-| `research-harvest` | แปลงรายงานที่ ingest แล้วเป็นตาราง/คิวตรวจ |
+| `gemini-deep-research` | brief/prompt ให้ tool นอกหา |
+| `research-ingest` | รับรายงาน ตรวจ DOI กับ Crossref ก่อนสร้างการ์ด+index |
+| `research-harvest` | แปลงรายงาน ingest แล้วเป็นตาราง/คิวตรวจ |
 | `paper-card` | paper เดี่ยว (DOI/APA/BibTeX) เข้าการ์ดตรง ไม่ผ่าน pipeline |
 
 ### สองทางเข้า หนึ่ง implementation
@@ -59,9 +59,7 @@ maw citation status        # เหมือนกันทุกอย่าง
 | 5 | `git rev-parse --show-toplevel` | อยู่ใน repo git |
 | 6 | cwd ตรง ๆ | ทางสุดท้าย |
 
-ข้อ 3 คือเหตุผลที่ `./bin/citation status` รันจาก `/tmp` ยังได้ผล (commit `051014b`) — ดูตำแหน่งสคริปต์ ไม่ใช่ที่ยืน
-
-รูตผิด `status` ไม่ error แค่รายงาน "0 paper card" เงียบ ๆ บนเครื่อง m5:
+ข้อ 3 ทำให้รันจาก `/tmp` ยังได้ผล (commit `051014b`) — รูตผิด `status` ไม่ error แค่รายงาน "0 paper card" บนเครื่อง m5:
 
 ```
 repo root: /opt/Code/github.com/Soul-Brews-Studio/
@@ -70,13 +68,13 @@ phd-citation-oracle (walk up from the script)
 
 ## 4.2 ψ/papers/ — การ์ดคือของจริง
 
-62 การ์ด กฎเดียว: **ชื่อไฟล์ = citekey = คีย์ใน `\cite{}`** `mahajan2025.md` มี `citekey: mahajan2025` วิทยานิพนธ์เขียน `\cite{mahajan2025}` ตรง ไม่มีชั้นแปล
+62 การ์ด กฎเดียว: **ชื่อไฟล์ = citekey = คีย์ใน `\cite{}`** `mahajan2025.md` มี `citekey: mahajan2025` วิทยานิพนธ์เขียน `\cite{mahajan2025}` ตรง
 
 README ของ `ψ/papers/`:
 
 > "ที่นี่คือ source of truth ไม่ใช่ `artifacts/literature_corpus.jsonl` — JSONL เป็นช่องทาง import ตอนเริ่มเท่านั้น แก้อะไรให้แก้ card"
 
-import แล้ว JSONL หมดหน้าที่ แก้ทีหลังไม่มีผลกับการ์ด (เว้น `cards` regenerate — 4.4)
+JSONL หมดหน้าที่หลัง import (เว้น `cards` regenerate — 4.4)
 
 62 การ์ดผูกกับ 1 ใน 6 taproot topic (`topic`, 4.3):
 
@@ -89,17 +87,15 @@ import แล้ว JSONL หมดหน้าที่ แก้ทีหล�
 | `reference-monitoring-bam` | 6 |
 | `multi-source-fusion-qa` | 6 |
 
-รวม 62 พอดี — กราฟบทที่ 5 ลงสีได้ 6 กลุ่ม
-
 ใน `ψ/papers/` มีไฟล์ที่ไม่ใช่การ์ดสองไฟล์:
 
 | ไฟล์ | คืออะไร | แก้มือได้ไหม |
 |---|---|---|
-| `<citekey>.md` | การ์ด — 1 ไฟล์ = 1 paper | ได้ นี่คือของจริง |
+| `<citekey>.md` | การ์ด — 1 ไฟล์ = 1 paper | ได้ |
 | `INDEX.md` | สารบัญ generate อัตโนมัติ | **ห้าม** — เดี๋ยวถูกทับ |
 | `README.md` | คู่มือเพิ่ม/แก้การ์ดด้วยมือ | ได้ แต่ไม่ใช่ข้อมูล |
 
-indexer ข้าม `INDEX.md`/README โดยตั้งใจ (เคยบั๊ก README หลุดเข้า index เป็น "uncategorized" — แก้แล้ว)
+indexer ข้าม `INDEX.md`/README โดยตั้งใจ
 
 ## 4.3 frontmatter 20 field
 
@@ -157,9 +153,9 @@ kind: paper
 | 19 | `aka` | citekey ก่อน rename | optional | ไม่ |
 | 20 | `authors_upstream` | ผู้เขียนก่อนแก้ | optional | ไม่ |
 
-แถว 3-6 "ทางอ้อม"/"ใช่" เพราะ embedder ไม่ใช้ frontmatter ดิบ แต่ใช้**label**จาก `authors`+`year`+`short_title` ต่อด้วย **Key findings**+**Thesis relevance** ถึง `## Notes`
+แถว 3-6 เพราะ embedder ไม่ใช้ frontmatter ดิบ แต่ใช้**label**จาก `authors`+`year`+`short_title` ต่อ **Key findings**+**Thesis relevance** ถึง `## Notes`
 
-journal/quartile/volume/pages/doi **ไม่ถูก embed** — ใช้ตอนออก `.bib`/โชว์ผลเท่านั้น ข้อความจริงที่ยิงเข้า `bge-m3` (การ์ดเดียวกัน):
+journal/quartile/volume/pages/doi **ไม่ถูก embed** — ใช้ตอนออก `.bib`/โชว์ผลเท่านั้น ข้อความที่ยิงเข้า `bge-m3`:
 
 ```text
 Mahajan & Helbing (2025) -- Trust-Based Dynamic Calibration
@@ -191,9 +187,9 @@ body ทุกการ์ดมีสามก้อนตายตัว ต�
 โน้ตของเราเอง
 ```
 
-parser จับสามก้อนด้วย pattern `**label** —` เว้นวรรค/สลับ format นิดเดียวจับไม่เจอ ต้องคงรูปแบบเวลาแก้มือ
+parser จับสามก้อนด้วย pattern `**label** —` เว้นวรรค/สลับ format นิดเดียวจับไม่เจอ
 
-จุดอันตราย — parser ไม่ error ตอนจับไม่เจอ คืนสตริงว่าง พิมพ์ `**Key Finding**` (s หาย) หรือลืม `—` → embed ว่าง แต่ `index` ผ่านปกติ search หาไม่เจอ — บั๊กเงียบแบบ NUL byte บทก่อน
+จุดอันตราย — parser ไม่ error ตอนจับไม่เจอ คืนสตริงว่าง พิมพ์ `**Key Finding**` (s หาย) หรือลืม `—` → embed ว่าง แต่ `index` ผ่านปกติ search หาไม่เจอ
 
 `cards` regenerate การ์ดทั้งชุดจาก JSONL ใช้ตอนอัปเดต/import เพิ่ม — ทับงานแก้มือได้ถ้าไม่ระวัง อะไรรอดเสมอ กับรอดเพิ่มเมื่อมี `verified:`:
 
@@ -208,7 +204,7 @@ parser จับสามก้อนด้วย pattern `**label** —` เว
 
 เหตุผล — JSONL ต้นทางผิดมาแต่แรก (4.6) ปล่อย `cards` ทับ field เหล่านี้เท่ากับ**revert verify ทิ้งหมด** — มี `verified:` คือ "ห้ามแตะ field นี้แล้ว"
 
-field อื่นนอกสองคอลัมน์ (`id` `short_title` `quartile` `impact_factor` `topic` `status` `tags` `kind` + body สามก้อนแรก) ถูก JSONL ทับทุกครั้งถ้ายังไม่ verified แก้ถาวรต้องแก้ JSONL เอง หรือเลิกใช้ `cards`
+field อื่น (`id` `short_title` `quartile` `impact_factor` `topic` `status` `tags` `kind` + body สามก้อนแรก) โดน JSONL ทับเสมอถ้ายังไม่ verified — แก้ถาวรต้องแก้ JSONL หรือเลิกใช้ `cards`
 
 ## 4.5 store — ไฟล์ธรรมดา 3 ไฟล์ ไม่มี database
 
@@ -231,19 +227,19 @@ standalone store บน m5 อยู่ `<repo>/.citation/store` — `manifest.j
 }
 ```
 
-75 แถว = 62 paper + 13 vault note (`--vault`) หนักราว 300 KB — เบากว่าไฟล์รูปหนึ่งใบ
+75 แถว = 62 paper + 13 vault note (`--vault`) หนักราว 300 KB
 
-`manifest.json` จำชื่อ model เพราะ vector ต่าง model **เทียบกันไม่ได้** — 1024 มิติจาก `bge-m3` ไม่อยู่พื้นที่เดียวกับ model อื่น สลับ model ต้อง `index` ใหม่ทั้งชุด
+`manifest.json` จำชื่อ model เพราะ vector ต่าง model **เทียบกันไม่ได้** — สลับ model ต้อง `index` ใหม่ทั้งชุด
 
-ผ่าน maw ย้ายไปเก็บที่ `$MAW_HOME/citation-data/store` แทน รูปแบบเหมือนเดิม gitignore ลบทิ้งได้ตลอด `index --vault` สร้างใหม่ได้เพราะเป็น derived data
+ผ่าน maw ย้ายไปเก็บที่ `$MAW_HOME/citation-data/store` แทน gitignore ลบทิ้งได้ตลอด `index --vault` สร้างใหม่ได้เพราะเป็น derived data
 
 search brute-force cosine ไม่มี ANN index — 75 แถวใช้เวลา **0.2 วินาที** รวม embed คำค้น ยังไม่ต้องคิด scale จนกว่า corpus โตหลักหมื่นแถว
 
 ## 4.6 aka: กับ authors_upstream: — ทำไมไม่มีอะไรถูกลบ
 
-รัน `citation doi` ครั้งแรกถาม Crossref หา DOI เจอ corpus ต้นทางผิด **18 จุด ใน 14 การ์ด** บางใบผิดถึงใส่ผู้เขียนคนแรกผิดคน
+รัน `citation doi` ถาม Crossref หา DOI เจอ corpus ต้นทางผิด **18 จุด ใน 14 การ์ด** บางใบผิดถึงใส่ผู้เขียนคนแรกผิดคน
 
-ตัวอย่าง — `jin2022.md` เดิมชื่อ `li2022.md` ใส่ผู้เขียน Li, R./Hu, Y./Li, H./Zhang, Y. แต่ Crossref ยืนยันคือ Jin, C. — rename `li2022` → `jin2022` ของเดิมไม่หาย การ์ดเดียวกันเก็บสองเวอร์ชัน:
+ตัวอย่าง — `jin2022.md` เดิมชื่อ `li2022.md` ใส่ผู้เขียน Li, R./Hu, Y./Li, H./Zhang, Y. แต่ Crossref ยืนยันคือ Jin, C. — rename `li2022` → `jin2022` การ์ดเดียวกันเก็บสองเวอร์ชัน:
 
 ```yaml
 citekey: jin2022
@@ -271,6 +267,6 @@ authors_upstream:
 
 `she2019` ร่องรอย title เดิมอยู่ `citation-audit.md`/git history เท่านั้น ไม่อยู่ไฟล์การ์ด
 
-สรุป — `aka:` ตามชื่อไฟล์เปลี่ยน `authors_upstream:` ตามเนื้อหา authors เปลี่ยน อิสระกัน field อื่น (title, pages, journal, volume) ไม่มี field รองรับ ต้องพึ่ง `citation-audit.md`/`git log` — "Nothing is Deleted" ไม่ใช่ field เดียวเก็บทุกอย่าง แต่**มีที่เก็บอยู่เสมอ** คนละชั้นตามอะไรเปลี่ยน
+สรุป — `aka:` ตามชื่อไฟล์เปลี่ยน `authors_upstream:` ตามเนื้อหา authors เปลี่ยน field อื่น (title, pages, journal, volume) ไม่มี field รองรับ ต้องพึ่ง `citation-audit.md`/`git log` — "Nothing is Deleted" ไม่ใช่ field เดียวเก็บทุกอย่าง แต่**มีที่เก็บอยู่เสมอ**
 
 บทที่ 5 เรียงคำสั่งทั้ง 8 ตัวตามลำดับใช้จริง เริ่มจาก `status` — โครงสร้างบทนี้คือสิ่งที่ `status` รายงานทุกครั้งที่เรียก
