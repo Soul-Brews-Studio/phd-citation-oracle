@@ -1,0 +1,11 @@
+# Secrets — never commit
+.env
+.env.*
+*.key
+*.pem
+# Oracle runtime
+ψ/active/
+ψ/memory/logs/
+.awaken-state.json
+# OS
+.DS_Store
