@@ -1,0 +1,11 @@
+{
+  "capabilities": [],
+  "cli": {
+    "command": "citation"
+  },
+  "entry": "./src/index.ts",
+  "name": "citation",
+  "sdk": "^1.0.0",
+  "target": "js",
+  "version": "0.1.0"
+}

@@ -1,0 +1,9 @@
+{
+  "dependencies": {
+    "@lancedb/lancedb": "^0.31.0"
+  },
+  "trustedDependencies": [
+    "onnxruntime-node",
+    "protobufjs"
+  ]
+}

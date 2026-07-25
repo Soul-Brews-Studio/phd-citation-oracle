@@ -9,3 +9,9 @@
 .awaken-state.json
 # OS
 .DS_Store
+
+# maw plugin install dir + index data (regenerated via maw plugin install)
+.maw/
+node_modules/
+ψ/lab/**/node_modules/
+ψ/lab/**/data/
