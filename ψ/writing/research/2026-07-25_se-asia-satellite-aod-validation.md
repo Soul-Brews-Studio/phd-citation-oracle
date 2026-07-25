@@ -286,8 +286,15 @@ a wrong DOI onto an existing card.
 Enriched: `jang2025`, `o2025` (DOIs + validation detail).
 Created: `nakapan2022`, `bai2021`, `choi2019`, `meng2015`, `she2019`, `chimla2025`.
 
-### Not yet harvested
+### Harvested — 2026-07-25
 
 The report's **Comparative Synthesis Table**, its three **Disagreements** sections, its
-**Unverified Claims** and its three **Critical Gaps** have been read but not converted into
-work products. That is `/research-harvest`'s job.
+**Unverified Claims** and its three **Critical Gaps** are now harvested into a decision file:
+[`2026-07-25_aod-harvest-comparator-decision.md`](2026-07-25_aod-harvest-comparator-decision.md)
+
+It carries the comparator decision and the four things that would flip it, every number with its
+measurement conditions attached (wavelength, matching window, station count — without those an R²
+is not comparable across products), an 8-item verification queue ranked by what a wrong answer
+would cost, and the three claimed gaps classified as real-absence vs search-failure. Only the
+TROPOMI gap looks like a genuine contribution opportunity, and it needs one deliberate negative
+search before it can be claimed.
