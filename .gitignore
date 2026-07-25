@@ -19,3 +19,6 @@ node_modules/
 # codex team runtime — auth symlinks, session logs, sqlite state. NEVER commit.
 .codex/
 .codex-team/
+
+# standalone-runner vector store (derived — rebuild with `citation index`)
+.citation/

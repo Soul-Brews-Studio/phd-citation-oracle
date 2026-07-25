@@ -1,4 +1,5 @@
 import { readFile, stat, mkdir, readdir } from "node:fs/promises";
+import { statSync } from "node:fs";
 import { join, dirname } from "node:path";
 
 type InvokeContext = { source: "cli"; args: string[] };
@@ -142,9 +143,13 @@ async function embedOne(text: string): Promise<number[]> {
 // and even 100k rows stays well under a second, which is far below the point
 // where an ANN index would earn a 487 MB native dependency.
 
-const STORE_DIR =
-  process.env.CITATION_STORE_DIR ||
-  (process.env.MAW_HOME ? `${process.env.MAW_HOME}/citation-data/store` : `${process.cwd()}/citation-data/store`);
+// Resolved lazily: the repo root isn't known at import time, and without maw the
+// store must follow the corpus rather than whatever directory you happened to be in.
+function storeDir(): string {
+  if (process.env.CITATION_STORE_DIR) return process.env.CITATION_STORE_DIR;
+  if (process.env.MAW_HOME) return `${process.env.MAW_HOME}/citation-data/store`;
+  return `${repoRoot()}/.citation/store`;
+}
 
 type StoreMeta = {
   id: string;
@@ -160,30 +165,32 @@ type StoreMeta = {
 type Manifest = { model: string; dim: number; count: number; updated: string };
 
 async function storeWrite(rows: Array<StoreMeta & { vector: number[] }>, model: string): Promise<Manifest> {
-  await mkdir(STORE_DIR, { recursive: true });
+  const dir = storeDir();
+  await mkdir(dir, { recursive: true });
   const dim = rows[0]?.vector.length ?? 0;
   const flat = new Float32Array(rows.length * dim);
   rows.forEach((r, i) => {
     if (r.vector.length !== dim) throw new Error(`row ${r.id} has dim ${r.vector.length}, expected ${dim}`);
     flat.set(r.vector, i * dim);
   });
-  await Bun.write(`${STORE_DIR}/vectors.f32`, flat.buffer as ArrayBuffer);
+  await Bun.write(`${dir}/vectors.f32`, flat.buffer as ArrayBuffer);
   await Bun.write(
-    `${STORE_DIR}/meta.jsonl`,
+    `${dir}/meta.jsonl`,
     rows.map(({ vector: _v, ...m }) => JSON.stringify(m)).join("\n") + "\n",
   );
   const manifest: Manifest = { model, dim, count: rows.length, updated: new Date().toISOString() };
-  await Bun.write(`${STORE_DIR}/manifest.json`, JSON.stringify(manifest, null, 2));
+  await Bun.write(`${dir}/manifest.json`, JSON.stringify(manifest, null, 2));
   return manifest;
 }
 
 async function storeRead(): Promise<{ meta: StoreMeta[]; vectors: Float32Array; manifest: Manifest } | null> {
-  const mf = Bun.file(`${STORE_DIR}/manifest.json`);
+  const dir = storeDir();
+  const mf = Bun.file(`${dir}/manifest.json`);
   if (!(await mf.exists())) return null;
   const manifest = (await mf.json()) as Manifest;
-  const metaText = await Bun.file(`${STORE_DIR}/meta.jsonl`).text();
+  const metaText = await Bun.file(`${dir}/meta.jsonl`).text();
   const meta = metaText.split("\n").filter(Boolean).map((l) => JSON.parse(l) as StoreMeta);
-  const buf = await Bun.file(`${STORE_DIR}/vectors.f32`).arrayBuffer();
+  const buf = await Bun.file(`${dir}/vectors.f32`).arrayBuffer();
   return { meta, vectors: new Float32Array(buf), manifest };
 }
 
@@ -214,12 +221,65 @@ function storeSearch(
   return out;
 }
 
-// `maw` cds into the plugin's own install dir before invoking it, so
-// process.cwd() is useless. MAW_HOME is set (via .envrc) to `<repo>/.maw`, so
-// its parent IS the repo root by construction — no guessing (muninn's lesson).
+// ── finding the repo, with or without maw ──
+// `maw` cds into the plugin's own install dir before invoking it, so cwd is
+// useless there; MAW_HOME's parent IS the repo root by construction. But the
+// standalone runner (bin/citation) has no MAW_HOME at all and may be invoked
+// from anywhere, so fall back to walking up for the repo's own markers.
+// A silently wrong root is this command's worst failure mode — it reports
+// "0 paper cards" and looks like data loss — so the resolution is recorded and
+// surfaced by `status`.
+
+let rootCache: { path: string; how: string } | null = null;
+
+function looksLikeRepo(dir: string): boolean {
+  try {
+    return statSync(join(dir, "CLAUDE.md")).isFile() && statSync(join(dir, "ψ")).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/** Walk up from `start` until a directory holds both CLAUDE.md and ψ/. */
+function walkUpForRepo(start: string): string | null {
+  let dir = start;
+  for (let i = 0; i < 12; i++) {
+    if (looksLikeRepo(dir)) return dir;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return null;
+}
+
+function resolveRoot(): { path: string; how: string } {
+  if (rootCache) return rootCache;
+
+  if (process.env.CITATION_ROOT) return (rootCache = { path: process.env.CITATION_ROOT, how: "CITATION_ROOT" });
+  // Keep maw behaviour byte-identical.
+  if (process.env.MAW_HOME) return (rootCache = { path: dirname(process.env.MAW_HOME), how: "MAW_HOME" });
+
+  // The shim lives inside the repo, so walking up from the SCRIPT works no
+  // matter where the caller happened to cd to.
+  const fromScript = walkUpForRepo(import.meta.dir);
+  if (fromScript) return (rootCache = { path: fromScript, how: "walk up from the script" });
+
+  const fromCwd = walkUpForRepo(process.cwd());
+  if (fromCwd) return (rootCache = { path: fromCwd, how: "walk up from cwd" });
+
+  try {
+    const git = Bun.spawnSync(["git", "rev-parse", "--show-toplevel"], { stdout: "pipe", stderr: "ignore" });
+    const out = new TextDecoder().decode(git.stdout).trim();
+    if (out && looksLikeRepo(out)) return (rootCache = { path: out, how: "git rev-parse" });
+  } catch {
+    /* git may not be installed */
+  }
+
+  return (rootCache = { path: process.cwd(), how: "cwd (fallback — no repo markers found)" });
+}
+
 function repoRoot(): string {
-  if (process.env.MAW_HOME) return dirname(process.env.MAW_HOME);
-  return process.cwd();
+  return resolveRoot().path;
 }
 
 // ── the corpus: one JSONL row per paper ──
@@ -274,12 +334,12 @@ async function checkArraBackend(): Promise<string> {
 async function checkStore(): Promise<string> {
   try {
     const s = await storeRead();
-    if (!s) return `  ⚠ store empty (${STORE_DIR}) — run "maw citation index"`;
+    if (!s) return `  ⚠ store empty (${storeDir()}) — run "citation index"`;
     const papers = s.meta.filter((m) => (m.kind || "paper") === "paper").length;
     const notes = s.meta.filter((m) => m.kind === "note").length;
     const bytes = (s.vectors.byteLength / 1024).toFixed(0);
     return (
-      `  ✓ store ready (${STORE_DIR}) — ${papers} paper(s)` +
+      `  ✓ store ready (${storeDir()}) — ${papers} paper(s)` +
       (notes ? ` + ${notes} vault note(s)` : "") +
       ` · ${s.manifest.dim}-dim · ${bytes} KB · model ${s.manifest.model}`
     );
@@ -315,8 +375,10 @@ async function cmdStatus(): Promise<PluginResult> {
     .then((s) => `  ✓ corpus present (${DEFAULT_CORPUS}) — ${s.size} bytes`)
     .catch(() => `  ⚠ corpus missing at ${DEFAULT_CORPUS}`);
   const cardCount = (await readPaperCards()).length;
+  const root = resolveRoot();
   const lines = [
     "── citation status ──",
+    `  ✓ repo root: ${root.path} (${root.how})`,
     `  ✓ ${cardCount} paper card(s) in ${PAPERS_DIR}`,
     corpusLine,
     await checkStore(),
@@ -786,7 +848,7 @@ async function cmdIndex(rest: string[]): Promise<PluginResult> {
 
   const manifest = await storeWrite(rows, await embedModelId());
   lines.push(
-    `Wrote ${STORE_DIR} — ${manifest.count} × ${manifest.dim}-dim ` +
+    `Wrote ${storeDir()} — ${manifest.count} × ${manifest.dim}-dim ` +
       `(${(manifest.count * manifest.dim * 4 / 1024).toFixed(0)} KB), model ${manifest.model}`,
   );
 
@@ -1405,7 +1467,8 @@ Run from inside Soul-Brews-Studio/phd-citation-oracle.
 
 Env:
   ARRA_URL              arra-oracle-v3 backend URL (default http://localhost:47778)
-  CITATION_STORE_DIR    vector store dir (default $MAW_HOME/citation-data/store)
+  CITATION_ROOT         repo root override (default: MAW_HOME, else walk up for CLAUDE.md + ψ/)
+  CITATION_STORE_DIR    vector store dir (default $MAW_HOME/citation-data/store, else <repo>/.citation/store)
   CITATION_EMBED        force a backend: ollama | worker | cf-rest (default: auto-detect, ollama first)
   OLLAMA_URL            ollama endpoint (default http://localhost:11434)
   CITATION_OLLAMA_MODEL local embedding model (default bge-m3)
@@ -1464,12 +1527,13 @@ export async function handler(ctx: InvokeContext): Promise<PluginResult> {
   }
 }
 
-export default handler;
-
 // Commands that start a server must NOT be exited — their Bun.serve() has to
 // keep the event loop alive. (Missing "serve" here made it print its banner and
-// die instantly, so nothing was ever listening.)
-const LONG_RUNNING = new Set<string>(["serve", "visualize"]);
+// die instantly, so nothing was ever listening.) Exported so bin/citation shares
+// the exact same list rather than keeping its own copy in sync.
+export const LONG_RUNNING = new Set<string>(["serve", "visualize"]);
+
+export default handler;
 
 if (import.meta.main) {
   const args = process.argv.slice(2);

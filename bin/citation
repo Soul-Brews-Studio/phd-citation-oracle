@@ -1,0 +1,29 @@
+#!/usr/bin/env bun
+// citation — the standalone runner. Works with no maw engine installed.
+//
+// The plugin and this shim share one implementation: ψ/lab/citation/src/index.ts
+// exports the same `handler` that maw invokes, so there is no second dispatch
+// path to keep in sync. All this file does is hand argv over and mirror the
+// exit-guard behaviour.
+//
+//   ./bin/citation status
+//   ./bin/citation index --vault
+//   ./bin/citation search "biomass burning haze northern thailand" -k 5
+//   ./bin/citation serve
+//
+// The repo root is found by walking up from THIS file for CLAUDE.md + ψ/, so it
+// works from any working directory. Override with CITATION_ROOT if needed.
+
+import handler, { LONG_RUNNING } from "../ψ/lab/citation/src/index.ts";
+
+const args = process.argv.slice(2);
+const result = await handler({ source: "cli", args });
+
+if (result.output) console.log(result.output);
+if (result.error) console.error(result.error);
+
+// `serve` starts a Bun.serve() that must keep the event loop alive — exiting
+// here would kill the server the instant it printed its URL.
+if (!LONG_RUNNING.has(args[0] ?? "") || !result.ok) {
+  process.exit(result.ok ? 0 : 1);
+}

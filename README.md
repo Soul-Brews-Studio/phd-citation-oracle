@@ -18,13 +18,24 @@ A [maw](https://github.com/Soul-Brews-Studio) plugin ([`ψ/lab/citation/`](ψ/la
 that indexes the paper corpus with **neural embeddings** and renders the citation graph.
 
 ```bash
-maw citation status                  # corpus + index + embed worker health
-maw citation cards                   # JSONL → one markdown card per paper in ψ/papers/
-maw citation index --vault           # embed the cards + the oracle's own notes → LanceDB
-maw citation search "biomass burning haze northern thailand"
-maw citation serve                   # interactive 2D constellation (verbose by default)
-maw citation graph --threshold 0.68 --html
+./bin/citation status                # ← works with NO maw installed
+./bin/citation cards                 # JSONL → one markdown card per paper in ψ/papers/
+./bin/citation index --vault         # embed the cards + the oracle's own notes
+./bin/citation search "biomass burning haze northern thailand"
+./bin/citation serve                 # interactive 2D constellation
+./bin/citation graph --threshold 0.68 --html
 ```
+
+`maw citation <verb>` is identical if you have [maw](https://github.com/Soul-Brews-Studio);
+both entries share one implementation. The runner walks up from its own location for
+`CLAUDE.md` + `ψ/`, so it works from any directory. Bootstrap a fresh clone with
+[`scripts/setup-citation.sh`](scripts/setup-citation.sh).
+
+**No dependencies.** 140 KB installed — no `node_modules`, no database. The vector store is
+three plain files (`vectors.f32`, `meta.jsonl`, `manifest.json`) and search is brute-force
+cosine in pure TypeScript. Embeddings come from **ollama on your own GPU** by default
+(`bge-m3`, no token, nothing leaves the machine), falling back to a Cloudflare worker or the
+Cloudflare REST API if you prefer a cloud embedder.
 
 **The corpus is markdown, not a database.** Each paper is a card in
 [`ψ/papers/`](ψ/papers/) — `citekey` frontmatter (the filename *is* the `\cite{}` key),
@@ -42,9 +53,9 @@ $ maw citation search "trust score weighting unreliable sensors" -k 3
   [0.8702] 📝 note (ψ/writing/research) Environmental prediction models for PM2.5 — and the prior art we must confront
 ```
 
-- **Embeddings**: `@cf/baai/bge-m3`, 1024-dim, via a local Cloudflare Workers AI worker
-  (no API token — reuses an existing `wrangler` login). Text embedded per paper is
-  `title + summary + thesis_relevance`.
+- **Embeddings**: `bge-m3`, 1024-dim. Local via **ollama** by default (your GPU, no token,
+  nothing leaves the machine); a Cloudflare worker or REST API are optional fallbacks.
+  Text embedded per paper is `title + summary + thesis_relevance`.
 - **Layout**: t-SNE (PCA-initialised, so it's deterministic), edges drawn above a cosine
   similarity threshold.
 - **The page** ([`src/page.html`](ψ/lab/citation/src/page.html)) is a real HTML file that the
@@ -64,7 +75,10 @@ Reusable [Claude Code](https://claude.com/claude-code) skills, free to take:
 
 | Skill | What it does |
 |---|---|
-| [`gemini-deep-research`](.claude/skills/gemini-deep-research/) | Interactively builds a rigorous, copy-paste research brief for **Google Gemini Deep Research** (or any agentic deep-research tool): objective tied to a decision, explicit out-of-scope list, source-quality bar, named output sections, citation rules, and instructions to flag what couldn't be verified. Domain-agnostic. |
+| [`gemini-deep-research`](.claude/skills/gemini-deep-research/) | Builds a rigorous, copy-paste research brief for **Gemini Deep Research** (or any agentic research tool): objective tied to a decision, explicit out-of-scope list, source-quality bar, named output sections. Domain-agnostic. |
+| [`research-ingest`](.claude/skills/research-ingest/) | Absorbs an external report: file verbatim with provenance → **verify every DOI against Crossref before it touches a card** → reconcile → index → prove searchable. |
+| [`research-harvest`](.claude/skills/research-harvest/) | Turns a filed report into work: the decision and what flips it, a comparison table keeping measurement conditions attached to every number, a verification queue, gaps classified as search-failure / real-absence / paywall. |
+| [`paper-card`](.claude/skills/paper-card/) | Papers in (citation / BibTeX / DOI / PDF / a whole bibliography, deduped first), bibliography out (BibTeX / CSV). Refuses to invent DOIs. |
 
 ### Research notes — [`ψ/writing/research/`](ψ/writing/research/)
 
@@ -79,10 +93,12 @@ Findings from delegated deep-research runs, kept with their uncertainty flags in
 
 ### The corpus
 
-[`artifacts/literature_corpus.jsonl`](artifacts/literature_corpus.jsonl) — 56 papers across
+[`ψ/papers/`](ψ/papers/) — **62 markdown cards**, 8 with Crossref-verified DOIs, across
 six topics (low-cost sensor calibration, satellite PM2.5 products, Thailand burning season,
-health policy, reference monitoring/BAM, multi-source fusion). Curated by the parent oracle;
-this repo holds a working copy.
+health policy, reference monitoring/BAM, multi-source fusion). Seeded from the parent oracle's
+[`literature_corpus.jsonl`](artifacts/literature_corpus.jsonl) (56 papers), then extended by
+ingesting external research. Nine cards are flagged `needs-authors` because the upstream
+reference list literally reads `[Authors]` — honest placeholders, not bugs.
 
 ## Honest caveats
 
@@ -105,7 +121,8 @@ this repo holds a working copy.
 ├── writing/
 │   ├── research/       delegated deep-research findings
 │   └── prompts/        research briefs written for other tools
-├── lab/citation/       the maw plugin (source of truth)
+├── papers/             ★ the corpus — one markdown card per paper
+├── lab/citation/       the plugin + standalone runner (source of truth)
 ├── inbox/ · outbox/    federation messages
 └── artifacts/          committed figures — never symlinked (see CLAUDE.md)
 ```

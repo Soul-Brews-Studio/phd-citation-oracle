@@ -48,6 +48,8 @@ cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787
 
 ### สั่ง index
 
+**มี maw:**
+
 ```bash
 cd /opt/Code/github.com/Soul-Brews-Studio/phd-citation-oracle
 export MAW_HOME="$PWD/.maw"        # ถ้ายังไม่ได้ direnv allow
@@ -55,6 +57,27 @@ export MAW_HOME="$PWD/.maw"        # ถ้ายังไม่ได้ direnv
 maw citation index                 # papers เท่านั้น (อ่านจาก card อัตโนมัติ)
 maw citation index --vault         # papers + note ของเรา (retro/lesson/research)
 ```
+
+**ไม่มี maw ก็ได้** — ใช้ `./bin/citation` แทน คำสั่งเหมือนกันหมด สั่งจากที่ไหนก็ได้
+(มันเดินขึ้นไปหา `CLAUDE.md` + `ψ/` เองจากตำแหน่งของ script):
+
+```bash
+./bin/citation index --vault
+./bin/citation search "..."
+./bin/citation serve
+```
+
+| ทางที่หา repo root | เมื่อไหร่ |
+|---|---|
+| `CITATION_ROOT` | ตั้ง env เอง (override) |
+| `MAW_HOME` | รันผ่าน maw — พฤติกรรมเดิมไม่เปลี่ยน |
+| เดินขึ้นจาก script | `./bin/citation` — ใช้ได้ทุก cwd |
+| เดินขึ้นจาก cwd → `git rev-parse` → cwd | fallback ตามลำดับ |
+
+`maw citation status` / `./bin/citation status` บรรทัดแรกจะบอกว่าหา root เจอด้วยวิธีไหน
+
+> store จะแยกกัน: ผ่าน maw ไปที่ `$MAW_HOME/citation-data/store`, แบบ standalone ไปที่
+> `<repo>/.citation/store` (gitignored ทั้งคู่ ลบแล้ว index ใหม่ได้)
 
 `--vault` คือตัวที่ทำให้ **ค้นหา paper กับความคิดของเราเจอในที่เดียว** — ผลลัพธ์จะแยกให้ว่า
 อันไหนเป็น `📄 paper` อันไหน `📝 note`

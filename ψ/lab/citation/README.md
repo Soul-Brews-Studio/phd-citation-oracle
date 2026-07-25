@@ -12,9 +12,10 @@ maw plugin, installed project-locally under `.maw/` (not the global
 cd /opt/Code/github.com/Soul-Brews-Studio/phd-citation-oracle
 direnv allow                         # loads .envrc → MAW_HOME=$PWD/.maw
 maw plugin install ψ/lab/citation    # copies source into .maw/plugins/citation
-cd .maw/plugins/citation && bun install && bun pm trust --all
-cd -
 ```
+
+No `bun install` — the plugin has **no dependencies**. Or skip maw entirely and use
+`./bin/citation` (see below); `scripts/setup-citation.sh` handles either path.
 
 `.envrc` sets `MAW_HOME` so `maw plugin install` / `maw citation` resolve to this
 repo's own `.maw/` — and `repoRoot()` derives from `dirname($MAW_HOME)` (muninn's
@@ -24,12 +25,12 @@ useless for finding the repo).
 ## Usage
 
 ```bash
-maw citation status                          # corpus + arra backend + LanceDB + CF embed, one check
+maw citation status                          # root + cards + store + embedder, one check
 maw citation cards [corpus.jsonl]            # JSONL → one markdown card per paper in ψ/papers/ (+ INDEX.md)
-maw citation index [--vault]                 # embed the cards → LanceDB; --vault also indexes retros/lessons/research
+maw citation index [--vault]                 # embed the cards → local store; --vault also indexes retros/lessons/research
 maw citation search <query> [-k N] [--json]  # semantic search over papers (and notes, if --vault was used)
 maw citation serve [--port N] [--threshold N] [--quiet]   # serve the interactive 2D constellation (:5556, verbose by default)
-maw citation graph [--threshold N] [--out P] [--html [P]] [--verbose]  # 2D network → PNG (+ portable interactive HTML)
+maw citation graph [--threshold N] [--out P] [--html [P]] [--verbose]  # 2D network → SVG (+ PNG if sharp present, + portable interactive HTML)
 ```
 
 `serve` (alias: `visualize`) is **verbose by default** — it prints embedding model,
@@ -72,15 +73,39 @@ install` copies it alongside the source, so it ships with the plugin.
 **`graph` vs `visualize`** — same t-SNE layout, same similarity edges, same two-line
 labels (author+year, then the paper's name). `visualize` *serves* the interactive page
 on a port; `graph --html` *writes* it to a file you can open or share with no server
-running. `graph` alone writes just the PNG.
+running. `graph` alone writes the SVG (plus a PNG when `sharp` happens to be installed).
 
-`search` / `index` / `visualize`-search need the **shared** local embed worker
-(no Cloudflare token — reuses your `wrangler` login). **Reuse the one already
-running**, don't start your own:
+`search` / `index` need an embedding backend, auto-detected in this order:
+
+| Backend | Condition | Notes |
+|---|---|---|
+| **ollama** | `bge-m3` pulled and ollama running | local, GPU-backed, no token, no egress — the default |
+| Cloudflare worker | worker on `:18787` | reuses your `wrangler` login |
+| Cloudflare REST | `CF_ACCOUNT_ID` + `CF_API_TOKEN` | a real token |
 
 ```bash
-cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787
+ollama pull bge-m3 && ollama serve                                  # local
+cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787      # or cloud
 ```
+
+Force one with `CITATION_EMBED=ollama|worker|cf-rest`. The model id is recorded in the
+store's `manifest.json` — vectors from different models are not comparable, so switching
+models means re-indexing.
+
+## Two entry points, one implementation
+
+| Entry | Needs | Repo root found via |
+|---|---|---|
+| `maw citation <verb>` | maw + bun | `MAW_HOME` (unchanged behaviour) |
+| `./bin/citation <verb>` | bun only | walking up from the script for `CLAUDE.md` + `ψ/` |
+
+Both call the same exported `handler`, so there is no second dispatch path to keep in sync.
+Resolution order: `CITATION_ROOT` → `MAW_HOME` → walk up from the script → walk up from cwd →
+`git rev-parse --show-toplevel` → cwd. `status` prints which one won, because a silently wrong
+root reports "0 paper cards" and looks like data loss.
+
+Store follows the root: `$MAW_HOME/citation-data/store` under maw, `<repo>/.citation/store`
+standalone. Both gitignored and rebuildable.
 
 ## Data
 
@@ -97,13 +122,13 @@ cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787
 - **One index for both**: `--vault` embeds `ψ/memory/{learnings,retrospectives,resonance}` and
   `ψ/writing/research` alongside the papers, tagged `kind: note`. Search spans both; the
   constellation stays papers-only.
-- **Batching**: embeds go out in groups of 16 (`CF_EMBED_BATCH`) — the worker 500s on one
-  large request once notes are included.
-- **Index**: LanceDB at `$MAW_HOME/citation-data/lancedb` (stable across
-  `--force` reinstalls, which wipe the plugin's own tree). `mergeInsert("id")`
-  makes re-indexing idempotent.
-- **Embeddings**: `@cf/baai/bge-m3`, 1024-dim, multilingual — genuinely neural,
-  the upgrade from the June TF-IDF maps.
+- **Batching**: embeds go out in groups of 16 (`CF_EMBED_BATCH`) — a single large request
+  fails once vault notes are included.
+- **Store**: three plain files — `vectors.f32` (N × dim Float32), `meta.jsonl`, `manifest.json`.
+  No database, no native dependency. Search is brute-force cosine in pure TypeScript: 73 rows
+  in ~0.2 s including the query embed. Delete the directory and re-index; it is derived data.
+- **Embeddings**: `bge-m3`, 1024-dim, multilingual — genuinely neural, the upgrade from the
+  June TF-IDF maps.
 
 ## After editing `src/index.ts`
 
@@ -111,12 +136,13 @@ The installed copy is a plain file copy, not a symlink — re-sync:
 
 ```bash
 maw plugin install ψ/lab/citation --force
-cd .maw/plugins/citation && bun install && bun pm trust --all
 ```
+
+(`./bin/citation` reads the source directly — nothing to reinstall.)
 
 ## Roadmap
 
-- `bib` — JSONL → BibTeX keys (needs full author/year, from `LITERATURE_REVIEW_PAPERS.md`)
-- `graph` — citation edges (claim ↔ source) for the related-work chapter
+- `bib` — cards → BibTeX (unblocked for the 8 cards with Crossref-verified DOIs; 9 cards
+  still need authors)
 
 Not built yet — *cite what's real*.
