@@ -421,6 +421,19 @@ function tsne(X: number[][], opts: { perplexity?: number; iters?: number } = {})
   return Y;
 }
 
+// maw buffers a plugin's stdout and prints it only once the plugin process
+// exits — which never happens for `serve`, so a plain console.log stays
+// invisible for the whole life of the server (you just get a blank prompt).
+// Writing to the controlling terminal bypasses that pipe entirely; fall back to
+// stdout when there is no tty (piped runs, CI, `bun run src/index.ts`).
+async function announce(text: string): Promise<void> {
+  try {
+    await Bun.write("/dev/tty", `${text}\n`);
+  } catch {
+    console.log(text);
+  }
+}
+
 // The interactive page lives in a REAL html file next to this source
 // (src/page.html) — edit it directly, no escaping games. `maw plugin install`
 // copies the whole source tree, so it ships with the plugin; import.meta.dir
@@ -584,7 +597,7 @@ async function cmdVisualize(rest: string[]): Promise<PluginResult> {
       served++;
     }
   }
-  if (served !== port) console.log(`⚠ port ${port} busy (an earlier visualize is still running) — using ${served}`);
+  const portNote = served !== port ? `⚠ port ${port} busy (an earlier serve is still running) — using ${served}\n` : "";
 
   // Verbose is the DEFAULT here: serving is interactive, so the stats are what
   // you want to see. `--quiet`/`-q` trims it back to the banner.
@@ -597,10 +610,9 @@ async function cmdVisualize(rest: string[]): Promise<PluginResult> {
   if (verbose) lines.push(...verboseLines(built.stats, built.edgeCount, built.nodeCount, threshold));
   lines.push("Ctrl+C to stop");
 
-  // Print NOW, don't return it: this command never finishes (the server keeps
-  // running), and the host only flushes a returned `output` once the handler's
-  // process exits — so a returned banner stays invisible until Ctrl+C.
-  console.log(lines.join("\n"));
+  // Announce NOW, straight to the terminal — this command never finishes, and
+  // maw only flushes returned output (or piped stdout) once the process exits.
+  await announce(portNote + lines.join("\n"));
   return { ok: true };
 }
 
