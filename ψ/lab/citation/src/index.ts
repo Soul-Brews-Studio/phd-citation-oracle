@@ -63,6 +63,42 @@ async function embedModelId(): Promise<string> {
   return b === "ollama" ? `ollama:${OLLAMA_MODEL}` : `cloudflare:${EMBED_MODEL}`;
 }
 
+/**
+ * The bare model name, with the provider and any registry path stripped:
+ *   "ollama:bge-m3"              -> "bge-m3"
+ *   "cloudflare:@cf/baai/bge-m3" -> "bge-m3"
+ * Same model served by two providers gives comparable vectors, so comparing full
+ * ids would cry wolf on every ollama↔worker switch. Comparing bare names catches
+ * the case that actually corrupts results: a genuinely different model.
+ */
+function bareModel(id: string): string {
+  return (id.split(":").pop() ?? id).split("/").pop()!.replace(/:latest$/, "").toLowerCase();
+}
+
+/**
+ * Guard against querying a store with vectors from a different model. Nothing
+ * checked this before: the model id was recorded in the manifest and displayed by
+ * `status`, but never compared — so switching to a different embedder returned
+ * confidently ranked nonsense, because cosine over two unrelated vector spaces
+ * still produces numbers.
+ */
+async function modelMismatchWarning(storeModel: string): Promise<string | null> {
+  let current: string;
+  try {
+    current = await embedModelId();
+  } catch {
+    return null; // no backend reachable — a louder error is coming anyway
+  }
+  if (bareModel(current) === bareModel(storeModel)) return null;
+  return (
+    `⚠ MODEL MISMATCH — the index was built with "${storeModel}" but the query would be\n` +
+    `  embedded with "${current}". Vectors from different models are not comparable, so the\n` +
+    `  ranking below would be meaningless. Re-index with the current backend:\n` +
+    `      citation index --vault\n` +
+    `  or force the original: CITATION_EMBED=${storeModel.startsWith("ollama") ? "ollama" : "worker"}`
+  );
+}
+
 async function embedViaOllama(texts: string[]): Promise<number[][]> {
   const res = await fetch(`${OLLAMA_URL}/api/embed`, {
     method: "POST",
@@ -1023,6 +1059,10 @@ async function cmdSearch(rest: string[]): Promise<PluginResult> {
 
   const store = await storeRead();
   if (!store) return { ok: false, error: `nothing indexed yet — run "maw citation index" first` };
+  // Refuse rather than rank nonsense: a wrong-model search looks exactly like a
+  // right-model search, scores and all.
+  const mismatch = await modelMismatchWarning(store.manifest.model);
+  if (mismatch) return { ok: false, error: mismatch };
   const vector = await embedOne(query);
   const hits = storeSearch(vector, store.vectors, store.manifest.dim, store.meta.length).slice(0, k);
   const results = hits.map((h) => ({ ...store.meta[h.index], score: h.score }));
@@ -1452,6 +1492,10 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
 
   const store = await storeRead();
   if (!store) return { ok: false, error: `nothing indexed yet — run "maw citation index" first` };
+  {
+    const mm = await modelMismatchWarning(store.manifest.model);
+    if (mm) return { ok: false, error: mm };
+  }
   const keep = store.meta.map((m, i) => ({ m, i })).filter(({ m }) => (m.kind || "paper") === "paper");
   if (keep.length === 0) return { ok: false, error: 'no papers in the index — run "maw citation index" first' };
   const rows = keep.map(({ m }) => m as unknown as Record<string, unknown>);
