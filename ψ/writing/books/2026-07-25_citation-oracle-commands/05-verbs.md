@@ -136,9 +136,9 @@ flag เดียว — `--by-topic` จัดกลุ่มตาม 6 หั
 
 ## 5.5 `index` / `search` — `--vault` รวม paper กับ note
 
-`index` แปลงข้อความจากการ์ดเป็นเวกเตอร์ 1024 มิติผ่าน ollama
-ทำหลัง `cards` เสร็จ ทำซ้ำเมื่อแก้ title/summary/relevance
-(แก้แค่ `doi:` ไม่ต้อง index ใหม่ — ไม่ถูก embed)
+`index` แปลงข้อความการ์ดเป็นเวกเตอร์ 1024 มิติผ่าน ollama ทำหลัง
+`cards` เสร็จ ทำซ้ำเมื่อแก้ title/summary/relevance (`doi:`
+ไม่ต้อง — ไม่ถูก embed)
 
 ```bash
 ./bin/citation index --vault
@@ -164,19 +164,16 @@ Wrote .../.maw/citation-data/store — 75 × 1024-dim
   together)
 ```
 
-path ของ store แล้วแต่ shell session — มี `MAW_HOME` export ได้
+path ของ store แล้วแต่ shell session — มี `MAW_HOME` ได้
 `.maw/citation-data/store` ไม่มีได้ `<repo>/.citation/store`
-แทน คนละ session ให้ผลต่างกันได้ — เชื่อ `status` เสมอว่า store
-อยู่ไหน
+แทน — เชื่อ `status` เสมอว่า store อยู่ไหน
 
 `--vault` = flag ใช้บ่อยสุด — ไม่ใส่ได้แค่ 62 paper ใส่แล้ว
-search ครอบคลุมโน้ตในวอลต์ด้วย (retro, learning, research
-draft) ค้นครั้งเดียวเจอทั้งคู่
+ครอบคลุมโน้ตวอลต์ด้วย (retro, learning, research draft)
 
 store ไม่ใช่ database — ไฟล์ธรรมดา 3 ไฟล์ (`vectors.f32`
-`meta.jsonl` `manifest.json`) manifest ล็อกชื่อ model ไว้
-เปลี่ยน model ต้อง `index` ใหม่ทั้งชุด เพราะเวกเตอร์คนละ model
-เทียบกันไม่ได้
+`meta.jsonl` `manifest.json`) เปลี่ยน model ต้อง `index` ใหม่
+ทั้งชุดเสมอ เวกเตอร์คนละ model เทียบกันไม่ได้
 
 ```bash
 ./bin/citation search "low-cost sensor calibration PM2.5" -k 3
@@ -196,11 +193,11 @@ Top 3 result(s) for "low-cost sensor calibration PM2.5...":
   (low-cost-sensor-calibration) ML Mixed Correction
 ```
 
-อันดับสองไม่ใช่ paper — เป็นโน้ตของเราเอง (📝) นี่คือสิ่งที่
-`--vault` เปิดทางไว้ ไม่ต้องแยกค้นสองรอบ
+อันดับสองไม่ใช่ paper — เป็นโน้ตของเราเอง (📝) ผลจาก `--vault`
+ไม่ต้องแยกค้นสองรอบ
 
-flag ใช้บ่อย — `-k N` กำหนดจำนวนผลลัพธ์ (default 5), `--json`
-ต่อ pipe เข้าสคริปต์อื่น
+flag ใช้บ่อย — `-k N` กำหนดจำนวนผล (default 5), `--json` ต่อ
+pipe สคริปต์อื่น
 
 ```bash
 ./bin/citation search "burning season northern Thailand" \
@@ -220,20 +217,17 @@ flag ใช้บ่อย — `-k N` กำหนดจำนวนผลลั
 ]
 ```
 
-ไม่มี database ไม่มี ANN index — brute-force cosine ล้วนๆ วิ่ง
-ผ่าน 75 แถวใช้เวลาราว 0.2 วินาที (รวม embed คำค้น) ข้อมูลแค่
-หลักสิบ ยังไม่ต้องซับซ้อนกว่านี้
+ไม่มี database ไม่มี ANN index — brute-force cosine ล้วนๆ 75
+แถวใช้เวลาราว 0.2 วินาที ข้อมูลแค่หลักสิบ ยังไม่ต้องซับซ้อนกว่านี้
 
 ## 5.6 `serve` / `graph` — ดูกลุ่มดาว
 
-ทั้งคู่คำนวณ cosine similarity ระหว่างทุกคู่ paper แล้ววาดเป็น
-เส้นเชื่อม — graph นี้คือ "ใกล้เคียงกันเชิงความหมาย" ไม่ใช่
-"ใครอ้างอิงใคร"
+ทั้งคู่คำนวณ cosine similarity ระหว่างทุกคู่ paper วาดเป็น
+เส้นเชื่อม — คือ "ใกล้เคียงเชิงความหมาย" ไม่ใช่ "ใครอ้างอิงใคร"
 
-`serve` (เรียก `visualize` ก็ได้) เปิด server ที่ localhost
-แบบ interactive ลาก ซูม hover ดูรายละเอียดสด default port 5556
-ชนพอร์ตเดิม — ขยับไปพอร์ตถัดไปเองอัตโนมัติ ไม่ล้มด้วย
-`EADDRINUSE`
+`serve` (หรือ `visualize`) เปิด server localhost แบบ interactive
+ลาก ซูม hover ดู default port 5556 ชนพอร์ตเดิม — ขยับเอง
+อัตโนมัติ ไม่ล้มด้วย `EADDRINUSE`
 
 ```bash
 ./bin/citation serve --port 5570
@@ -255,12 +249,11 @@ drag to pan · scroll to zoom · click a star for detail
         6  Choi et al. (2019)
 ```
 
-"isolated 15" ไม่ใช่บั๊ก — 15 ใบไม่มีเส้นเชื่อมถึงใครที่
-threshold 0.68 แค่แปลว่าเนื้อหาห่างจากใบอื่น ลด threshold ถึง
-จะเห็นเส้นบางๆ โผล่มา
+"isolated 15" ไม่ใช่บั๊ก — 15 ใบไม่มีเส้นเชื่อมที่ threshold 0.68
+แค่ห่างจากใบอื่น ลด threshold ถึงเห็นเส้นบางๆ
 
-`graph` render ผลเดียวกันเป็นไฟล์นิ่ง — SVG กับ PNG แนบเอกสาร
-ได้ตรงๆ ไม่ต้องมี server ค้างไว้
+`graph` render ผลเดียวกันเป็นไฟล์นิ่ง — SVG/PNG แนบเอกสารได้ตรง
+ไม่ต้องมี server ค้าง
 
 ```bash
 ./bin/citation graph
@@ -274,25 +267,25 @@ dense — raise threshold for a cleaner graph:
 maw citation graph --threshold 0.60
 ```
 
-threshold default ของ `graph` (0.5) ต่ำกว่า `serve` (0.68)
-โดยตั้งใจ — ได้ 1336 เส้นทันที เครื่องมือเตือน "dense" พร้อม
-บอกเลขที่ควรลอง
+threshold default ของ `graph` (0.5) ต่ำกว่า `serve` (0.68) โดย
+ตั้งใจ — ได้ 1336 เส้นทันที เครื่องมือเตือน "dense" พร้อมบอกเลข
+ที่ควรลอง
 
 | flag | ใช้กับ | ทำอะไร |
 |---|---|---|
-| `--threshold N` | ทั้งคู่ | ปรับความเข้มของเส้น (สูง = น้อยลงแต่มั่นใจกว่า) |
-| `--quiet` | `serve` | ตัดส่วน verbose เหลือแค่ banner กับ URL |
+| `--threshold N` | ทั้งคู่ | ปรับความเข้มเส้น (สูง = น้อยแต่มั่นใจกว่า) |
+| `--quiet` | `serve` | ตัด verbose เหลือแค่ banner + URL |
 | `--html` | `graph` | export หน้า interactive เป็น `.html` ไม่ต้องรัน server |
 
 PNG ต้องมี `sharp` — optional dependency ตัวเดียวในทั้ง repo
 ไม่มีก็ไม่พัง ได้แค่ SVG พร้อมข้อความ `(png skipped — 'sharp'
-not installed; the SVG above is the figure)` ซึ่งคมกว่า PNG
-อยู่แล้วในฐานะ vector image
+not installed; the SVG above is the figure)` คมกว่า PNG อยู่แล้ว
+ในฐานะ vector image
 
 ## 5.7 ลำดับที่ใช้จริงตอนเริ่มจากศูนย์
 
-Copy ทั้งก้อนไปรันได้เลย ไม่ต้องแก้อะไร (`ollama pull` ใช้เวลา
-ตามความเร็วเน็ต ที่เหลือเป็นวินาที)
+Copy ทั้งก้อนไปรันได้เลย ไม่ต้องแก้ (`ollama pull` ตามความเร็ว
+เน็ต ที่เหลือเป็นวินาที)
 
 ```bash
 git clone \
@@ -331,7 +324,6 @@ ollama pull bge-m3
 ./bin/citation serve
 ```
 
-9 ขั้นตอนแต่ 8 คำสั่ง (`doi` ปรากฏสองครั้ง — dry run ก่อน แล้ว
-ค่อย `--write`) จากศูนย์ถึงมี `.bib` พร้อมส่งวิทยานิพนธ์ กับ
-แผนที่ดาวให้มอง ใช้เวลาไม่ถึงห้านาทีบนเครื่องที่มี ollama รัน
-อยู่แล้ว
+9 ขั้นตอน 8 คำสั่ง (`doi` ปรากฏสองครั้ง — dry run ก่อน ค่อย
+`--write`) จากศูนย์ถึงมี `.bib` พร้อมส่งวิทยานิพนธ์ กับแผนที่ดาว
+ให้มอง ใช้เวลาไม่ถึง 5 นาทีบนเครื่องที่มี ollama รันอยู่แล้ว

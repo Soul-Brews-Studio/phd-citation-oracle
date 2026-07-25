@@ -152,10 +152,10 @@ embed คือ `title + summary + thesis_relevance` เท่านั้น �
 
 | ผิดอะไร | บทเรียน |
 |---|---|
-| นับ error ตัวเองผิด (`c01b2f5` บอก 11, จริง 18) | สร้าง `citation-audit.md` generate จาก git diff จริงแทนคำกล่าวอ้าง — ไม่ rewrite commit เดิม |
-| บอก Nat ว่า "แก้แล้ว" ทั้งที่เทสผ่าน pipe redirect ไม่เคยแตะ TTY จริง | ทดสอบใน environment ของผู้ใช้ ไม่ใช่ environment ที่สะดวกกับเรา |
+| นับ error ตัวเองผิด (`c01b2f5` บอก 11, จริง 18) | generate `citation-audit.md` จาก git diff จริง — ไม่ rewrite commit เดิม |
+| บอก Nat ว่า "แก้แล้ว" ทั้งที่เทสผ่าน pipe redirect ไม่เคยแตะ TTY จริง | ทดสอบใน environment ของผู้ใช้ ไม่ใช่ที่สะดวกกับเรา |
 | NUL byte ดิบใน sort key ทำ ripgrep มองไฟล์เป็น binary เกือบเข้าใจผิดว่า `sharp` ไม่ได้ใช้แล้ว | เขียน escape `\u0000` แทนตัวอักษรดิบเสมอ |
-| `git add -A` เผลอเอา `.codex/` เข้า repo public (Nat จับได้ ไม่ใช่เรา) | review `git diff --cached --name-only` ก่อน commit ทุกครั้ง ไม่ใช้ `-A` แบบไม่คิด |
+| `git add -A` เผลอเอา `.codex/` เข้า repo public (Nat จับได้ ไม่ใช่เรา) | review `git diff --cached --name-only` ก่อน commit ทุกครั้ง |
 
 นับ error ผิดข้อแรกอันตรายกว่าที่ฟังดู เพราะนับน้อยกว่าความ
 จริง — audit ดูน่าเชื่อถือเกินจริง
