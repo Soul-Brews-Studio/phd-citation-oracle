@@ -1,13 +1,13 @@
 # บทที่ 7: Index แบบ Local — ollama บนเครื่องเรา
 
-คำสั่ง pull model, serve, index --vault บน ollama local — เวลาจริงวัดบน m5
+คำสั่ง pull model, serve, index --vault บน ollama local — เวลาวัดจริงบน m5
 (Apple M5 Max, arm64, 18 cores, 128 GB unified memory), ค่า batch, ตาราง
 troubleshoot
 
 ## 7.1 ทำไม local เป็น default
 
 corpus ยังไม่ตีพิมพ์ — `thesis_relevance` คือ argument ที่ยังไม่เผยแพร่
-ฉะนั้น default ต้องเป็นตัวที่ **ไม่ออกเน็ต** เสมอ
+default จึงต้อง **ไม่ออกเน็ต** เสมอ
 
 | ลำดับ | backend | ต้องมีอะไร | ออกเน็ตไหม |
 |---|---|---|---|
@@ -18,8 +18,8 @@ corpus ยังไม่ตีพิมพ์ — `thesis_relevance` คือ 
 พอ ollama พร้อม ระบบเลือกเองทันที ไม่ต้อง token/account/ต่อเน็ต cloud เป็น
 ตัวสำรอง เปิดใช้เมื่อไม่มี GPU หรือ ollama ล่ม
 
-`thesis_relevance` คือการตีความว่า paper ค้ำ claim ไหน — ยังไม่เผยแพร่
-บาง paper ยังเป็น preprint ส่งออกนอกเครื่องเท่ากับส่งข้อมูลคนอื่นไปด้วย
+`thesis_relevance` คือการตีความว่า paper ค้ำ claim ไหน — บาง paper ยังเป็น
+preprint ส่งออกนอกเครื่องเท่ากับส่งข้อมูลคนอื่นไปด้วย
 
 ระบบไล่บนลงล่าง เจอ ollama ที่พร้อมก็หยุด บังคับ backend ตรงๆ ได้เช่นกัน:
 
@@ -39,7 +39,7 @@ ollama pull bge-m3
 # บน m5 ไม่ใช่เลขจากเอกสารของ ollama เอง
 ```
 
-ต้องมี ollama รันอยู่เบื้องหลัง ถึงจะรับ request embed ได้:
+ต้องมี ollama รันเบื้องหลัง ถึงจะรับ request embed ได้:
 
 ```bash
 ollama serve
@@ -48,8 +48,8 @@ ollama serve
 ```
 
 bge-m3 = ตัวเดียวที่ citation ใช้ (multilingual, 1024 มิติ) ไทย/อังกฤษอยู่
-vector space เดียวกัน พิมพ์คำถามไทยเจอ paper อังกฤษได้ embed ต่อ paper คือ
-title+summary+thesis_relevance เท่านั้น ไม่ใช่ทั้งการ์ด
+vector space เดียวกัน embed ต่อ paper คือ title+summary+thesis_relevance
+เท่านั้น ไม่ใช่ทั้งการ์ด
 
 ฟิลด์อย่าง `doi` `volume` `pages` ไม่ถูก embed — เติม `doi` ทีหลังได้
 ไม่ต้อง index ใหม่ทั้งชุด

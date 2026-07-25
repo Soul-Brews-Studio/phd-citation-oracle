@@ -5,14 +5,14 @@ output จริง
 
 | ลำดับ | คำสั่ง | ทำอะไร |
 |---|---|---|
-| 1 | `status` | เช็คทุกชิ้นส่วนพร้อมไหม — รันก่อนเสมอ |
-| 2 | `cards` | JSONL → การ์ด markdown 1 ใบ/paper |
-| 3 | `doi` | ถาม Crossref หา DOI + ผู้แต่ง |
-| 4 | `bib` | การ์ด → `.bib` ใช้ใน LaTeX |
-| 5 | `index` | embed การ์ดเข้า vector store |
+| 1 | `status` | เช็คทุกอย่างพร้อมไหม |
+| 2 | `cards` | JSONL → การ์ด 1 ใบ/paper |
+| 3 | `doi` | หา DOI จาก Crossref |
+| 4 | `bib` | การ์ด → `.bib` |
+| 5 | `index` | embed เข้า vector store |
 | 6 | `search` | ค้นความหมาย ไม่ใช่ค้นคำ |
-| 7 | `serve` | แผนที่ดาวแบบ interactive |
-| 8 | `graph` | แผนที่ดาวเป็น PNG/SVG |
+| 7 | `serve` | แผนที่ดาว interactive |
+| 8 | `graph` | แผนที่ดาว PNG/SVG |
 
 7-8 เป็นคู่ ข้อมูลชุดเดียวกัน — `serve` ลาก-ซูมสด `graph`
 เป็นไฟล์นิ่ง
@@ -102,13 +102,13 @@ default คือทุกใบที่ DOI/ผู้แต่งไม่ค�
 
 | flag | ทำอะไร |
 |---|---|
-| `--write` | เขียนผลจริงลงการ์ด (ไม่ใส่ = dry run) |
+| `--write` | เขียนผลลงการ์ด (ไม่ใส่ = dry run) |
 | `--all` | เช็คซ้ำทุกใบ แม้มี DOI แล้ว |
 | `--rekey` | เปลี่ยนชื่อไฟล์เป็นชื่อจริง (คีย์เก่าเก็บใน `aka:`) |
 
 รันจริงทั้งคลัง — DOI จาก 8/62 → 61/62 เจอ error 18 จุดใน 14
-การ์ด ส่วนใหญ่วารสาร/หน้า/ผู้แต่งคนแรกผิด (Crossref เชื่อได้กว่า
-JSONL ต้นทาง) รายละเอียดที่ `artifacts/citation-audit.md`
+การ์ด ส่วนใหญ่วารสาร/หน้า/ผู้แต่งผิด รายละเอียดที่
+`artifacts/citation-audit.md`
 
 ## 5.4 `bib` — การ์ด → `artifacts/citation.bib`
 
@@ -124,9 +124,9 @@ Use in LaTeX:  \bibliography{artifacts/citation}
   then \cite{adong2025}
 ```
 
-"citable" ≠ มี DOI — แปลว่าผู้แต่ง/ชื่อเรื่อง/วารสาร/ปีครบ การ์ด
-ที่ขาดผู้แต่ง**คอมเมนต์ไว้ ไม่ตัดทิ้ง** — `withheld` บอกว่าขาด
-อะไร แก้ด้วย `citation doi --write` แล้วรัน `bib` ใหม่
+"citable" ≠ มี DOI — ต้องมีผู้แต่ง/ชื่อเรื่อง/วารสาร/ปีครบ ขาด
+ผู้แต่ง**คอมเมนต์ไว้ ไม่ตัดทิ้ง** — `withheld` บอกว่าขาดอะไร แก้
+ด้วย `doi --write` แล้วรัน `bib` ใหม่
 
 flag เดียว — `--by-topic` จัดกลุ่มตาม 6 หัวข้อแทน citekey ช่วย
 เขียน related work ทีละหัวข้อ
@@ -273,14 +273,13 @@ threshold default ของ `graph` (0.5) ต่ำกว่า `serve` (0.68) �
 
 | flag | ใช้กับ | ทำอะไร |
 |---|---|---|
-| `--threshold N` | ทั้งคู่ | ปรับความเข้มเส้น (สูง = น้อยแต่มั่นใจกว่า) |
-| `--quiet` | `serve` | ตัด verbose เหลือแค่ banner + URL |
-| `--html` | `graph` | export หน้า interactive เป็น `.html` ไม่ต้องรัน server |
+| `--threshold N` | ทั้งคู่ | ปรับความเข้มเส้น |
+| `--quiet` | `serve` | ตัด verbose เหลือ banner + URL |
+| `--html` | `graph` | export เป็น `.html` ไม่ต้องรัน server |
 
-PNG ต้องมี `sharp` — optional dependency ตัวเดียวในทั้ง repo
-ไม่มีก็ไม่พัง ได้แค่ SVG พร้อมข้อความ `(png skipped — 'sharp'
-not installed; the SVG above is the figure)` คมกว่า PNG อยู่แล้ว
-ในฐานะ vector image
+PNG ต้องมี `sharp` — optional dependency เดียวในทั้ง repo ไม่มี
+ก็ไม่พัง ได้ SVG พร้อมข้อความ `(png skipped — 'sharp' not
+installed; the SVG above is the figure)`
 
 ## 5.7 ลำดับที่ใช้จริงตอนเริ่มจากศูนย์
 
@@ -324,6 +323,6 @@ ollama pull bge-m3
 ./bin/citation serve
 ```
 
-9 ขั้นตอน 8 คำสั่ง (`doi` ปรากฏสองครั้ง — dry run ก่อน ค่อย
-`--write`) จากศูนย์ถึงมี `.bib` พร้อมส่งวิทยานิพนธ์ กับแผนที่ดาว
-ให้มอง ใช้เวลาไม่ถึง 5 นาทีบนเครื่องที่มี ollama รันอยู่แล้ว
+9 ขั้นตอน 8 คำสั่ง (`doi` ปรากฏสองครั้ง) จากศูนย์ถึงมี `.bib`
+พร้อมส่งวิทยานิพนธ์ กับแผนที่ดาวให้มอง ใช้เวลาไม่ถึง 5 นาทีถ้ามี
+ollama รันอยู่แล้ว
