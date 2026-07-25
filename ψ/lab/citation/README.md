@@ -27,8 +27,14 @@ useless for finding the repo).
 maw citation status                          # corpus + arra backend + LanceDB + CF embed, one check
 maw citation index [corpus.jsonl]            # embed papers (default artifacts/literature_corpus.jsonl) → LanceDB
 maw citation search <query> [-k N] [--json]  # semantic search over indexed papers
-maw citation visualize [--port N]            # 3D constellation — papers as stars, topics as colors (default :5556)
+maw citation visualize [--port N] [--threshold N]   # serve the interactive 2D constellation (default :5556)
+maw citation graph [--threshold N] [--out P] [--html [P]]  # render the 2D network → PNG (+ portable interactive HTML)
 ```
+
+**`graph` vs `visualize`** — same t-SNE layout, same similarity edges, same two-line
+labels (author+year, then the paper's name). `visualize` *serves* the interactive page
+on a port; `graph --html` *writes* it to a file you can open or share with no server
+running. `graph` alone writes just the PNG.
 
 `search` / `index` / `visualize`-search need the **shared** local embed worker
 (no Cloudflare token — reuses your `wrangler` login). **Reuse the one already

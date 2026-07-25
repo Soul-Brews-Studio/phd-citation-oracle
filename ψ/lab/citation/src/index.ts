@@ -425,20 +425,19 @@ function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
-async function cmdVisualize(rest: string[]): Promise<PluginResult> {
-  const portFlagIndex = rest.indexOf("--port");
-  const port = portFlagIndex >= 0 ? Number(rest[portFlagIndex + 1]) : Number(process.env.CITATION_VISUALIZE_PORT) || 5556;
-  const tIdx = rest.indexOf("--threshold");
-  const threshold = tIdx >= 0 ? Number(rest[tIdx + 1]) : 0.68;
+// Shared page builder: the interactive 2D constellation. `visualize` serves it;
+// `graph --html` writes it to a file so it opens/shares without a server running.
+type BuiltPage = { html: string; nodeCount: number; topicCount: number; edgeCount: number };
 
+async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { error: string }> {
   const db = await lancedb.connect(LANCEDB_DIR);
   const tableNames = await db.tableNames();
   if (!tableNames.includes(TABLE_NAME)) {
-    return { ok: false, error: `table "${TABLE_NAME}" doesn't exist yet — run "maw citation index" first` };
+    return { error: `table "${TABLE_NAME}" doesn't exist yet — run "maw citation index" first` };
   }
   const table = await db.openTable(TABLE_NAME);
   const rows = await table.query().toArray();
-  if (rows.length === 0) return { ok: false, error: 'index is empty — run "maw citation index" first' };
+  if (rows.length === 0) return { error: 'index is empty — run "maw citation index" first' };
 
   const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
   const coords = tsne(vectors);
@@ -458,7 +457,8 @@ async function cmdVisualize(rest: string[]): Promise<PluginResult> {
   const nodes = rows.map((r: Record<string, unknown>, i: number) => ({
     x: px[i], y: py[i],
     title: String(r.title), journal: String(r.journal), topic: String(r.topic),
-    label: shortLabel(String(r.title)),
+    label: shortLabel(String(r.title)),   // author + year
+    name: paperName(String(r.title)),     // the paper's descriptive name
   }));
   const topics = [...new Set(nodes.map((n) => n.topic))].sort();
   const palette = ["#2ca88f", "#e8724c", "#5b74c9", "#d94f9a", "#7bc043", "#f2c53d", "#c9a66b", "#9aa0a6"];
@@ -546,11 +546,22 @@ const gNodes=document.createElementNS(SVGNS,'g');
 svg.appendChild(gNodes);
 const circles=[];
 NODES.forEach((n,i)=>{
+  // two lines: author+year (bold), then the paper's name (lighter)
+  const above=(i%2===0);
   const t=document.createElementNS(SVGNS,'text');
-  t.setAttribute('x',n.x);t.setAttribute('y', (i%2===0? n.y-14 : n.y+22));
-  t.setAttribute('font-size','15');t.setAttribute('text-anchor','middle');t.setAttribute('fill','#1a1a2e');
+  t.setAttribute('x',n.x);t.setAttribute('y',(above? (n.name? n.y-32 : n.y-14) : n.y+22));
+  t.setAttribute('text-anchor','middle');
   t.setAttribute('paint-order','stroke');t.setAttribute('stroke','#ffffff');t.setAttribute('stroke-width','3.5');t.setAttribute('stroke-linejoin','round');
-  t.textContent=n.label;
+  const l1=document.createElementNS(SVGNS,'tspan');
+  l1.setAttribute('x',n.x);l1.setAttribute('font-size','15');l1.setAttribute('font-weight','600');l1.setAttribute('fill','#1a1a2e');
+  l1.textContent=n.label;
+  t.appendChild(l1);
+  if(n.name){
+    const l2=document.createElementNS(SVGNS,'tspan');
+    l2.setAttribute('x',n.x);l2.setAttribute('dy','15');l2.setAttribute('font-size','12.5');l2.setAttribute('fill','#5b6270');
+    l2.textContent=n.name;
+    t.appendChild(l2);
+  }
   gNodes.appendChild(t);
   const c=document.createElementNS(SVGNS,'circle');
   c.setAttribute('cx',n.x);c.setAttribute('cy',n.y);c.setAttribute('r','9');
@@ -614,13 +625,25 @@ resultsEl.addEventListener('click',(e)=>{const it=e.target.closest('.ri');if(!it
 </script>
 </body></html>`;
 
-  Bun.serve({ port, fetch: () => new Response(html, { headers: { "content-type": "text/html" } }) });
+  return { html, nodeCount: nodes.length, topicCount: topics.length, edgeCount: edges.length };
+}
+
+async function cmdVisualize(rest: string[]): Promise<PluginResult> {
+  const portFlagIndex = rest.indexOf("--port");
+  const port = portFlagIndex >= 0 ? Number(rest[portFlagIndex + 1]) : Number(process.env.CITATION_VISUALIZE_PORT) || 5556;
+  const tIdx = rest.indexOf("--threshold");
+  const threshold = tIdx >= 0 ? Number(rest[tIdx + 1]) : 0.68;
+
+  const built = await buildConstellationHtml(threshold);
+  if ("error" in built) return { ok: false, error: built.error };
+
+  Bun.serve({ port, fetch: () => new Response(built.html, { headers: { "content-type": "text/html" } }) });
 
   return {
     ok: true,
     output:
       `✦ citation constellation (2D) — http://localhost:${port}\n` +
-      `${nodes.length} papers · ${topics.length} topics · ${edges.length} edges (sim > ${threshold})\n` +
+      `${built.nodeCount} papers · ${built.topicCount} topics · ${built.edgeCount} edges (sim > ${threshold})\n` +
       `drag to pan · scroll to zoom · hover a star · search to highlight\nCtrl+C to stop`,
   };
 }
@@ -647,6 +670,15 @@ function shortLabel(title: string): string {
   return label.length > 40 ? `${label.slice(0, 38)}…` : label;
 }
 
+// The other half: "Barkjohn et al. (2021) -- US-wide PurpleAir Correction"
+// → "US-wide PurpleAir Correction". Empty when the title has no descriptive part.
+function paperName(title: string): string {
+  const parts = title.split(/\s+(?:--|—)\s+/);
+  const tail = parts.slice(1).join(" — ").trim();
+  if (!tail) return "";
+  return tail.length > 44 ? `${tail.slice(0, 42)}…` : tail;
+}
+
 function svgEscape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -668,7 +700,12 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
   if (rows.length === 0) return { ok: false, error: 'index is empty — run "maw citation index" first' };
 
   const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
-  const nodes = rows.map((r: Record<string, unknown>) => ({ title: String(r.title), topic: String(r.topic), label: shortLabel(String(r.title)) }));
+  const nodes = rows.map((r: Record<string, unknown>) => ({
+    title: String(r.title),
+    topic: String(r.topic),
+    label: shortLabel(String(r.title)),  // author + year
+    name: paperName(String(r.title)),    // the paper's descriptive name
+  }));
   const coords = tsne(vectors);
 
   // canvas — scale on the 2nd–98th percentile so a stray outlier can't
@@ -714,10 +751,16 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
   const nodeSvg = nodes
     .map((n, i) => {
       const above = i % 2 === 0; // alternate label above/below to reduce collisions
-      const ly = above ? py[i] - 14 : py[i] + 22;
+      // two lines: author+year, then the paper's name underneath
+      const ly = above ? py[i] - (n.name ? 32 : 14) : py[i] + 22;
+      const x = px[i].toFixed(1);
+      const line2 = n.name
+        ? `<tspan x="${x}" dy="15" font-size="12.5" font-weight="400" fill="#5b6270">${svgEscape(n.name)}</tspan>`
+        : "";
       return (
-        `<circle cx="${px[i].toFixed(1)}" cy="${py[i].toFixed(1)}" r="9" fill="${colorFor(n.topic)}" stroke="#ffffff" stroke-width="1.5"/>` +
-        `<text x="${px[i].toFixed(1)}" y="${ly.toFixed(1)}" font-family="${FONT_SANS}" font-size="15" text-anchor="middle" fill="#26262e" paint-order="stroke" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round">${svgEscape(n.label)}</text>`
+        `<circle cx="${x}" cy="${py[i].toFixed(1)}" r="9" fill="${colorFor(n.topic)}" stroke="#ffffff" stroke-width="1.5"/>` +
+        `<text y="${ly.toFixed(1)}" font-family="${FONT_SANS}" text-anchor="middle" paint-order="stroke" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round">` +
+        `<tspan x="${x}" font-size="15" font-weight="600" fill="#1a1a2e">${svgEscape(n.label)}</tspan>${line2}</text>`
       );
     })
     .join("");
@@ -744,10 +787,25 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
   await mkdir(dirname(outPath), { recursive: true });
   await sharp(Buffer.from(svg)).png().toFile(outPath);
 
+  // --html: also write the interactive page (same t-SNE + edges) as a portable
+  // file — openable/shareable without keeping `visualize`'s server running.
+  let htmlNote = "";
+  if (rest.includes("--html")) {
+    const hIdx = rest.indexOf("--html");
+    const nextArg = rest[hIdx + 1];
+    const htmlArg = nextArg && !nextArg.startsWith("--") ? nextArg : outArg.replace(/\.png$/, ".html");
+    const htmlPath = join(repoRoot(), htmlArg);
+    const built = await buildConstellationHtml(threshold);
+    if ("error" in built) return { ok: false, error: built.error };
+    await mkdir(dirname(htmlPath), { recursive: true });
+    await Bun.write(htmlPath, built.html);
+    htmlNote = `\n✦ interactive page → ${htmlPath} (open in a browser: pan/zoom/hover/search)`;
+  }
+
   return {
     ok: true,
     output:
-      `✦ citation graph → ${outPath}\n` +
+      `✦ citation graph → ${outPath}${htmlNote}\n` +
       `${nodes.length} papers · ${topics.length} topics · ${edges.length} edges (cosine > ${threshold}, max observed ${maxSim.toFixed(3)})\n` +
       (edges.length === 0
         ? `no edges at this threshold — lower it: maw citation graph --threshold ${(maxSim - 0.05).toFixed(2)}`
@@ -767,7 +825,7 @@ Usage:
   maw citation index [corpus.jsonl]          Embed the paper corpus (default: ${DEFAULT_CORPUS}) into LanceDB
   maw citation search <query> [-k N] [--json]  Semantic search over indexed papers (default k=5)
   maw citation visualize [--port N]          Serve the 3D constellation — papers as stars, topics as colors (default port 5556)
-  maw citation graph [--threshold N] [--out PATH]  Render a 2D labeled similarity network → PNG (default artifacts/citation-network.png, threshold 0.5)
+  maw citation graph [--threshold N] [--out PATH] [--html [PATH]]  Render the 2D labeled similarity network → PNG (default artifacts/citation-network.png, threshold 0.5); --html also writes the interactive page
 
 Run from inside Soul-Brews-Studio/phd-citation-oracle.
 (maw x citation <verb> also works — same plugin, explicit invocation.)
