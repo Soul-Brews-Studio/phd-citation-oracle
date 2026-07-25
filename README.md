@@ -102,6 +102,25 @@ $ maw citation search "trust score weighting unreliable sensors" -k 3
 answered with IDF-weighted term overlap — labelled in the UI as *evidence for* a semantic
 match, not its cause. An honest explanation beats a confident one.
 
+### Manuals (Thai) — two editions of the same 15 chapters
+
+Written for this tool, but the pattern is *cards + local embedding*, not PM2.5 — so they work for
+any corpus. Every command in both was run on the machine before it was written down, and where
+something wasn't measured (index time on a machine with no GPU) they say so instead of estimating.
+
+| | Pages | Words | Commands | For |
+|---|---:|---:|---:|---|
+| **[คู่มือคำสั่ง](ψ/writing/books/2026-07-25_citation-oracle-commands/)** — commands edition | **59** | ~15,000 | **125** | Getting it running. Commands and tables, built to look things up in. |
+| **[ฉบับสมบูรณ์](ψ/writing/books/2026-07-25_citation-oracle-complete-manual/)** — full manual | 170 | 46,560 | 108 | Understanding *why* it's built this way. Read front to back. |
+
+Both cover: เตรียมของ/ติดตั้ง · โครงสร้าง · the 8 verbs · **Index six ways** (local ollama, CPU,
+Apple Silicon Metal, Cloudflare, offline/cafe) · and the research loop — write a brief, hand it to
+Gemini/GPT, **verify what comes back**, build the `.bib`.
+
+Both are reproducible: `./build.sh` in either directory. Fonts are vendored and the build **aborts**
+on a font fallback, because a fallback face silently mis-stacks Thai tone marks and a warning is not
+enough. Requires typst ≥ 0.15.1 — 0.14.x renders Thai marks wrong.
+
 ### Skills — [`.claude/skills/`](.claude/skills/) · MIT licensed
 
 Reusable [Claude Code](https://claude.com/claude-code) skills, free to take:
