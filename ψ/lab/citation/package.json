@@ -1,9 +1,14 @@
 {
   "dependencies": {
-    "@lancedb/lancedb": "^0.31.0"
+    "@lancedb/lancedb": "^0.31.0",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.0"
   },
   "trustedDependencies": [
     "onnxruntime-node",
-    "protobufjs"
+    "protobufjs",
+    "sharp"
   ]
 }

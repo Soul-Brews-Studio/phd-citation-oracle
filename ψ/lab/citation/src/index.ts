@@ -1,6 +1,7 @@
 import * as lancedb from "@lancedb/lancedb";
-import { readFile, stat } from "node:fs/promises";
+import { readFile, stat, mkdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
+import sharp from "sharp";
 
 type InvokeContext = { source: "cli"; args: string[] };
 type PluginResult = { ok: boolean; output?: string; error?: string };
@@ -15,7 +16,7 @@ const ARRA_URL = process.env.ARRA_URL || "http://localhost:47778";
 // data/ dir. Prefer $MAW_HOME (stable across reinstalls).
 const LANCEDB_DIR =
   process.env.CITATION_LANCEDB_DIR ||
-  (process.env.MAW_HOME ? `${process.env.MAW_HOME}/citation-data/lancedb` : `${import.meta.dir}/../data/lancedb`);
+  (process.env.MAW_HOME ? `${process.env.MAW_HOME}/citation-data/lancedb` : `${process.cwd()}/citation-data/lancedb`);
 const TABLE_NAME = "papers";
 const LOCAL_WORKER_URL = process.env.CF_EMBED_WORKER_URL || "http://localhost:18787";
 const EMBED_MODEL = process.env.CF_EMBED_MODEL || "@cf/baai/bge-m3";
@@ -233,7 +234,7 @@ async function cmdSearch(rest: string[]): Promise<PluginResult> {
   const results = await table.vectorSearch(vector).limit(k).toArray();
 
   if (json) {
-    const payload = results.map((r) => ({
+    const payload = results.map((r: Record<string, unknown>) => ({
       distance: r._distance ?? null,
       id: String(r.id),
       title: String(r.title),
@@ -318,10 +319,10 @@ async function cmdVisualize(rest: string[]): Promise<PluginResult> {
   const rows = await table.query().toArray();
   if (rows.length === 0) return { ok: false, error: 'index is empty — run "maw citation index" first' };
 
-  const vectors = rows.map((r) => Array.from(r.vector as ArrayLike<number>));
+  const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
   const coords = pcaND(vectors, 3);
 
-  const points = rows.map((r, i) => ({
+  const points = rows.map((r: Record<string, unknown>, i: number) => ({
     x: coords[i]?.[0] ?? 0,
     y: coords[i]?.[1] ?? 0,
     z: coords[i]?.[2] ?? 0,
@@ -560,6 +561,131 @@ animate();
   };
 }
 
+// ── graph — 2D labeled similarity network, rendered to PNG (the readable one) ──
+// papers as labeled nodes, colored by topic, edges where cosine similarity >
+// threshold. This IS the citation graph. Matches the June "Research Concept
+// Network" style Nat found readable — flat, labeled, edged.
+
+function cosine(a: number[], b: number[]): number {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+}
+
+// "Barkjohn et al. (2021) -- US-wide PurpleAir Correction" → "Barkjohn et al. (2021)"
+function shortLabel(title: string): string {
+  const head = title.split(/\s+(?:--|—|-)\s+/)[0].trim();
+  const label = head || title;
+  return label.length > 40 ? `${label.slice(0, 38)}…` : label;
+}
+
+function svgEscape(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+async function cmdGraph(rest: string[]): Promise<PluginResult> {
+  const tIdx = rest.indexOf("--threshold");
+  const threshold = tIdx >= 0 ? Number(rest[tIdx + 1]) : 0.5;
+  const oIdx = rest.indexOf("--out");
+  const outArg = oIdx >= 0 ? rest[oIdx + 1] : "artifacts/citation-network.png";
+  const outPath = join(repoRoot(), outArg);
+
+  const db = await lancedb.connect(LANCEDB_DIR);
+  const tableNames = await db.tableNames();
+  if (!tableNames.includes(TABLE_NAME)) {
+    return { ok: false, error: `table "${TABLE_NAME}" doesn't exist yet — run "maw citation index" first` };
+  }
+  const table = await db.openTable(TABLE_NAME);
+  const rows = await table.query().toArray();
+  if (rows.length === 0) return { ok: false, error: 'index is empty — run "maw citation index" first' };
+
+  const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
+  const nodes = rows.map((r: Record<string, unknown>) => ({ title: String(r.title), topic: String(r.topic), label: shortLabel(String(r.title)) }));
+  const coords = pcaND(vectors, 2);
+
+  // canvas
+  const W = 2000, H = 1300, M = 90;
+  const xs = coords.map((c) => c[0] ?? 0), ys = coords.map((c) => c[1] ?? 0);
+  const [minX, maxX] = [Math.min(...xs), Math.max(...xs)];
+  const [minY, maxY] = [Math.min(...ys), Math.max(...ys)];
+  const sx = (x: number) => M + ((x - minX) / (maxX - minX || 1)) * (W - 2 * M);
+  const sy = (y: number) => H - M - ((y - minY) / (maxY - minY || 1)) * (H - 2 * M); // flip
+  const px = coords.map((c) => sx(c[0] ?? 0));
+  const py = coords.map((c) => sy(c[1] ?? 0));
+
+  // topics + palette
+  const topics = [...new Set(nodes.map((n) => n.topic))].sort();
+  const palette = ["#2ca88f", "#e8724c", "#5b74c9", "#d94f9a", "#7bc043", "#f2c53d", "#c9a66b", "#9aa0a6"];
+  const colorFor = (topic: string) => palette[topics.indexOf(topic) % palette.length];
+
+  // edges above threshold
+  const edges: Array<{ i: number; j: number; s: number }> = [];
+  let maxSim = 0;
+  for (let i = 0; i < vectors.length; i++) {
+    for (let j = i + 1; j < vectors.length; j++) {
+      const s = cosine(vectors[i], vectors[j]);
+      if (s > maxSim) maxSim = s;
+      if (s > threshold) edges.push({ i, j, s });
+    }
+  }
+
+  const edgeSvg = edges
+    .map((e) => {
+      const op = Math.min(0.5, (e.s - threshold) / (1 - threshold) + 0.12).toFixed(3);
+      const w = (0.6 + (e.s - threshold) * 6).toFixed(2);
+      return `<line x1="${px[e.i].toFixed(1)}" y1="${py[e.i].toFixed(1)}" x2="${px[e.j].toFixed(1)}" y2="${py[e.j].toFixed(1)}" stroke="#9aa3ad" stroke-width="${w}" stroke-opacity="${op}"/>`;
+    })
+    .join("");
+
+  const nodeSvg = nodes
+    .map((n, i) => {
+      const above = i % 2 === 0; // alternate label above/below to reduce collisions
+      const ly = above ? py[i] - 14 : py[i] + 22;
+      return (
+        `<circle cx="${px[i].toFixed(1)}" cy="${py[i].toFixed(1)}" r="9" fill="${colorFor(n.topic)}" stroke="#ffffff" stroke-width="1.5"/>` +
+        `<text x="${px[i].toFixed(1)}" y="${ly.toFixed(1)}" font-size="15" text-anchor="middle" fill="#1a1a2e" paint-order="stroke" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round">${svgEscape(n.label)}</text>`
+      );
+    })
+    .join("");
+
+  const legendSvg =
+    `<rect x="34" y="34" width="360" height="${44 + topics.length * 30}" rx="10" fill="#ffffff" stroke="#d7dbe0" stroke-width="1.5"/>` +
+    `<text x="54" y="66" font-size="21" font-weight="700" fill="#1a1a2e">Research Clusters</text>` +
+    topics
+      .map((t, i) => {
+        const cy = 92 + i * 30;
+        const count = nodes.filter((n) => n.topic === t).length;
+        return `<circle cx="64" cy="${cy - 5}" r="8" fill="${colorFor(t)}"/><text x="82" y="${cy}" font-size="17" fill="#33373d">${svgEscape(t)} (${count})</text>`;
+      })
+      .join("");
+
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+    `<rect width="${W}" height="${H}" fill="#ffffff"/>` +
+    `<text x="${W / 2}" y="52" font-size="30" font-weight="800" text-anchor="middle" fill="#141428">Citation Constellation — Similarity &gt; ${threshold} (bge-m3, ${nodes.length} papers)</text>` +
+    edgeSvg + legendSvg + nodeSvg +
+    `</svg>`;
+
+  await mkdir(dirname(outPath), { recursive: true });
+  await sharp(Buffer.from(svg)).png().toFile(outPath);
+
+  return {
+    ok: true,
+    output:
+      `✦ citation graph → ${outPath}\n` +
+      `${nodes.length} papers · ${topics.length} topics · ${edges.length} edges (cosine > ${threshold}, max observed ${maxSim.toFixed(3)})\n` +
+      (edges.length === 0
+        ? `no edges at this threshold — lower it: maw citation graph --threshold ${(maxSim - 0.05).toFixed(2)}`
+        : edges.length > 400
+          ? `dense — raise threshold for a cleaner graph: maw citation graph --threshold ${(threshold + 0.1).toFixed(2)}`
+          : `tune with --threshold N`),
+  };
+}
+
 // ── dispatch ──
 
 function helpText(): string {
@@ -570,6 +696,7 @@ Usage:
   maw citation index [corpus.jsonl]          Embed the paper corpus (default: ${DEFAULT_CORPUS}) into LanceDB
   maw citation search <query> [-k N] [--json]  Semantic search over indexed papers (default k=5)
   maw citation visualize [--port N]          Serve the 3D constellation — papers as stars, topics as colors (default port 5556)
+  maw citation graph [--threshold N] [--out PATH]  Render a 2D labeled similarity network → PNG (default artifacts/citation-network.png, threshold 0.5)
 
 Run from inside Soul-Brews-Studio/phd-citation-oracle.
 (maw x citation <verb> also works — same plugin, explicit invocation.)
@@ -584,7 +711,7 @@ Env:
 Roadmap: bib (JSONL → .bib keys), graph (citation edges). Not built yet — cite what's real.`;
 }
 
-const KNOWN_COMMANDS = ["status", "index", "search", "visualize"] as const;
+const KNOWN_COMMANDS = ["status", "index", "search", "visualize", "graph"] as const;
 
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -617,6 +744,8 @@ export async function handler(ctx: InvokeContext): Promise<PluginResult> {
       return cmdSearch(rest);
     case "visualize":
       return cmdVisualize(rest);
+    case "graph":
+      return cmdGraph(rest);
     case undefined:
       return { ok: true, output: helpText() };
     default: {
