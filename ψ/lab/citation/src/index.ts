@@ -1,7 +1,5 @@
-import * as lancedb from "@lancedb/lancedb";
 import { readFile, stat, mkdir, readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
-import sharp from "sharp";
 
 type InvokeContext = { source: "cli"; args: string[] };
 type PluginResult = { ok: boolean; output?: string; error?: string };
@@ -14,13 +12,8 @@ const ARRA_URL = process.env.ARRA_URL || "http://localhost:47778";
 // Data lives outside the plugin's own installed dir — `maw plugin install`
 // copies the whole source tree, so a `--force` reinstall would wipe an in-tree
 // data/ dir. Prefer $MAW_HOME (stable across reinstalls).
-const LANCEDB_DIR =
-  process.env.CITATION_LANCEDB_DIR ||
-  (process.env.MAW_HOME ? `${process.env.MAW_HOME}/citation-data/lancedb` : `${process.cwd()}/citation-data/lancedb`);
-const TABLE_NAME = "papers";
 const LOCAL_WORKER_URL = process.env.CF_EMBED_WORKER_URL || "http://localhost:18787";
 const EMBED_MODEL = process.env.CF_EMBED_MODEL || "@cf/baai/bge-m3";
-const EMBED_DIM = 1024;
 const DEFAULT_CORPUS = "artifacts/literature_corpus.jsonl";
 
 // Professional type pairing (matches the oracle book skills' book-feel): a
@@ -29,9 +22,61 @@ const DEFAULT_CORPUS = "artifacts/literature_corpus.jsonl";
 const FONT_SERIF = "Charter, 'Iowan Old Style', Georgia, 'Times New Roman', serif";
 const FONT_SANS = "'Helvetica Neue', Helvetica, 'Segoe UI', Arial, sans-serif";
 
-// ── embedding (shared local wrangler-dev worker, no API token) ──
+// ── embedding backends ──
+// Three, tried in this order unless CITATION_EMBED is set:
+//   ollama    — fully local, uses the GPU (Metal on Apple silicon). No account,
+//               no token, no network. Default when it is running.
+//   worker    — the shared wrangler-dev Cloudflare worker on :18787.
+//   cf-rest   — Cloudflare REST with CF_ACCOUNT_ID + CF_API_TOKEN.
+// The point is that indexing must work on a laptop with nothing configured,
+// while still allowing a cloud embedder when you want one.
+
+const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
+const OLLAMA_MODEL = process.env.CITATION_OLLAMA_MODEL || "bge-m3";
+type Backend = "ollama" | "worker" | "cf-rest";
+
+let backendCache: Backend | null = null;
+
+async function detectBackend(): Promise<Backend> {
+  if (backendCache) return backendCache;
+  const forced = process.env.CITATION_EMBED as Backend | undefined;
+  if (forced) return (backendCache = forced);
+  // Prefer local: no token, no egress, and on Apple silicon it is GPU-backed.
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(1500) });
+    if (res.ok) {
+      const json = (await res.json()) as { models?: Array<{ name?: string }> };
+      const has = (json.models ?? []).some((m) => (m.name ?? "").startsWith(OLLAMA_MODEL));
+      if (has) return (backendCache = "ollama");
+    }
+  } catch {
+    /* not running — fall through */
+  }
+  if (process.env.CF_ACCOUNT_ID && process.env.CF_API_TOKEN) return (backendCache = "cf-rest");
+  return (backendCache = "worker");
+}
+
+/** Model identity is stored with the index — mixing models silently is a correctness bug. */
+async function embedModelId(): Promise<string> {
+  const b = await detectBackend();
+  return b === "ollama" ? `ollama:${OLLAMA_MODEL}` : `cloudflare:${EMBED_MODEL}`;
+}
+
+async function embedViaOllama(texts: string[]): Promise<number[][]> {
+  const res = await fetch(`${OLLAMA_URL}/api/embed`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ model: OLLAMA_MODEL, input: texts }),
+  });
+  if (!res.ok) throw new Error(`ollama embed failed: ${res.status} ${await res.text().catch(() => "")}`);
+  const json = (await res.json()) as { embeddings?: number[][] };
+  if (!json.embeddings?.length) throw new Error("ollama returned no embeddings");
+  return json.embeddings;
+}
 
 async function embedTexts(texts: string[]): Promise<number[][]> {
+  const backend = await detectBackend();
+  if (backend === "ollama") return embedViaOllama(texts);
   if (process.env.CF_ACCOUNT_ID && process.env.CF_API_TOKEN) {
     const url = `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/${EMBED_MODEL}`;
     const res = await fetch(url, {
@@ -88,6 +133,87 @@ async function embedOne(text: string): Promise<number[]> {
   return vector;
 }
 
+// ── the vector store — plain files, no native dependencies ──
+// Two files plus a manifest:
+//   vectors.f32  N × dim little-endian Float32, row-major
+//   meta.jsonl   one JSON object per row, same order
+//   manifest.json  { model, dim, count, updated }
+// Brute-force cosine over a Float32Array is O(N·dim): ~62 papers is microseconds
+// and even 100k rows stays well under a second, which is far below the point
+// where an ANN index would earn a 487 MB native dependency.
+
+const STORE_DIR =
+  process.env.CITATION_STORE_DIR ||
+  (process.env.MAW_HOME ? `${process.env.MAW_HOME}/citation-data/store` : `${process.cwd()}/citation-data/store`);
+
+type StoreMeta = {
+  id: string;
+  kind: string;
+  citekey: string;
+  title: string;
+  journal: string;
+  topic: string;
+  path: string;
+  text: string;
+  indexed_at: string;
+};
+type Manifest = { model: string; dim: number; count: number; updated: string };
+
+async function storeWrite(rows: Array<StoreMeta & { vector: number[] }>, model: string): Promise<Manifest> {
+  await mkdir(STORE_DIR, { recursive: true });
+  const dim = rows[0]?.vector.length ?? 0;
+  const flat = new Float32Array(rows.length * dim);
+  rows.forEach((r, i) => {
+    if (r.vector.length !== dim) throw new Error(`row ${r.id} has dim ${r.vector.length}, expected ${dim}`);
+    flat.set(r.vector, i * dim);
+  });
+  await Bun.write(`${STORE_DIR}/vectors.f32`, flat.buffer as ArrayBuffer);
+  await Bun.write(
+    `${STORE_DIR}/meta.jsonl`,
+    rows.map(({ vector: _v, ...m }) => JSON.stringify(m)).join("\n") + "\n",
+  );
+  const manifest: Manifest = { model, dim, count: rows.length, updated: new Date().toISOString() };
+  await Bun.write(`${STORE_DIR}/manifest.json`, JSON.stringify(manifest, null, 2));
+  return manifest;
+}
+
+async function storeRead(): Promise<{ meta: StoreMeta[]; vectors: Float32Array; manifest: Manifest } | null> {
+  const mf = Bun.file(`${STORE_DIR}/manifest.json`);
+  if (!(await mf.exists())) return null;
+  const manifest = (await mf.json()) as Manifest;
+  const metaText = await Bun.file(`${STORE_DIR}/meta.jsonl`).text();
+  const meta = metaText.split("\n").filter(Boolean).map((l) => JSON.parse(l) as StoreMeta);
+  const buf = await Bun.file(`${STORE_DIR}/vectors.f32`).arrayBuffer();
+  return { meta, vectors: new Float32Array(buf), manifest };
+}
+
+/** Cosine against every row. Vectors are pre-normalised by neither backend, so normalise here. */
+function storeSearch(
+  query: number[],
+  vectors: Float32Array,
+  dim: number,
+  count: number,
+  filter?: (i: number) => boolean,
+): Array<{ index: number; score: number }> {
+  let qn = 0;
+  for (const v of query) qn += v * v;
+  qn = Math.sqrt(qn) || 1;
+  const out: Array<{ index: number; score: number }> = [];
+  for (let i = 0; i < count; i++) {
+    if (filter && !filter(i)) continue;
+    let dot = 0, rn = 0;
+    const off = i * dim;
+    for (let d = 0; d < dim; d++) {
+      const x = vectors[off + d];
+      dot += x * query[d];
+      rn += x * x;
+    }
+    out.push({ index: i, score: dot / ((Math.sqrt(rn) || 1) * qn) });
+  }
+  out.sort((a, b) => b.score - a.score);
+  return out;
+}
+
 // `maw` cds into the plugin's own install dir before invoking it, so
 // process.cwd() is useless. MAW_HOME is set (via .envrc) to `<repo>/.maw`, so
 // its parent IS the repo root by construction — no guessing (muninn's lesson).
@@ -132,63 +258,70 @@ function paperText(p: Paper): string {
 
 // ── status — arra liveness + LanceDB + CF embed, one check ──
 
+// Optional liveness check only — arra is NOT on the data path (the store is local
+// files). It must never be able to hang `status`: an unbounded fetch here froze the
+// command for minutes when the backend stopped responding mid-session.
 async function checkArraBackend(): Promise<string> {
   try {
-    const res = await fetch(`${ARRA_URL}/api/health`);
+    const res = await fetch(`${ARRA_URL}/api/health`, { signal: AbortSignal.timeout(2000) });
     const json = (await res.json()) as { data?: { status?: string; version?: string } };
-    return `  ✓ arra-oracle-v3 reachable (${ARRA_URL}) — ${json.data?.status ?? "unknown"} (v${json.data?.version ?? "?"})`;
-  } catch (error) {
-    return `  ✗ arra-oracle-v3 unreachable at ${ARRA_URL}: ${error instanceof Error ? error.message : String(error)}`;
+    return `  ✓ arra-oracle-v3 reachable (${ARRA_URL}) — ${json.data?.status ?? "unknown"} (v${json.data?.version ?? "?"}) [optional]`;
+  } catch {
+    return `  ⚠ arra-oracle-v3 not responding at ${ARRA_URL} [optional — not used for storage or search]`;
   }
 }
 
-async function checkLanceDB(): Promise<string> {
+async function checkStore(): Promise<string> {
   try {
-    const db = await lancedb.connect(LANCEDB_DIR);
-    const tables = await db.tableNames();
-    if (!tables.includes(TABLE_NAME)) {
-      return `  ⚠ LanceDB connected (${LANCEDB_DIR}) — nothing indexed yet (run "maw citation index")`;
-    }
-    const table = await db.openTable(TABLE_NAME);
-    const total = await table.countRows();
-    // Report papers and notes separately — calling 65 rows "65 papers" when 9 are
-    // vault notes is exactly the kind of quietly-wrong number worth avoiding.
-    let breakdown = `${total} row(s)`;
-    try {
-      const papers = await table.countRows("kind = 'paper'");
-      const notes = await table.countRows("kind = 'note'");
-      breakdown = `${papers} paper(s)` + (notes ? ` + ${notes} vault note(s)` : "");
-    } catch {
-      /* pre-`kind` index — total is all we can say */
-    }
-    return `  ✓ LanceDB connected (${LANCEDB_DIR}) — ${breakdown} indexed`;
+    const s = await storeRead();
+    if (!s) return `  ⚠ store empty (${STORE_DIR}) — run "maw citation index"`;
+    const papers = s.meta.filter((m) => (m.kind || "paper") === "paper").length;
+    const notes = s.meta.filter((m) => m.kind === "note").length;
+    const bytes = (s.vectors.byteLength / 1024).toFixed(0);
+    return (
+      `  ✓ store ready (${STORE_DIR}) — ${papers} paper(s)` +
+      (notes ? ` + ${notes} vault note(s)` : "") +
+      ` · ${s.manifest.dim}-dim · ${bytes} KB · model ${s.manifest.model}`
+    );
   } catch (error) {
-    return `  ✗ LanceDB connect failed: ${error instanceof Error ? error.message : String(error)}`;
+    return `  ✗ store unreadable: ${error instanceof Error ? error.message : String(error)}`;
   }
 }
 
-async function checkCloudEmbed(): Promise<string> {
+async function checkEmbedBackend(): Promise<string> {
   try {
+    const backend = await detectBackend();
     const vec = await embedOne("healthcheck");
-    const mode = process.env.CF_ACCOUNT_ID && process.env.CF_API_TOKEN ? "REST API (token)" : "local worker (no token)";
-    const dimNote = vec.length === EMBED_DIM ? "" : ` (expected ${EMBED_DIM})`;
-    return `  ✓ Cloudflare embed reachable [${mode}] — ${vec.length}-dim vector${dimNote}`;
+    const where =
+      backend === "ollama"
+        ? `ollama ${OLLAMA_MODEL} @ ${OLLAMA_URL} — local, GPU-backed, no token`
+        : backend === "cf-rest"
+          ? `Cloudflare REST ${EMBED_MODEL} (token)`
+          : `local worker ${LOCAL_WORKER_URL} (${EMBED_MODEL}, no token)`;
+    return `  ✓ embeddings: ${where} — ${vec.length}-dim`;
   } catch (error) {
-    return `  ⚠ Cloudflare embed unavailable: ${error instanceof Error ? error.message : String(error)}`;
+    return (
+      `  ✗ no embedding backend reachable: ${error instanceof Error ? error.message : String(error)}\n` +
+      `      local option:  ollama pull ${OLLAMA_MODEL} && ollama serve\n` +
+      `      cloud option:  cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787`
+    );
   }
 }
+
 
 async function cmdStatus(): Promise<PluginResult> {
   const corpusPath = join(repoRoot(), DEFAULT_CORPUS);
   const corpusLine = await stat(corpusPath)
     .then((s) => `  ✓ corpus present (${DEFAULT_CORPUS}) — ${s.size} bytes`)
     .catch(() => `  ⚠ corpus missing at ${DEFAULT_CORPUS}`);
+  const cardCount = (await readPaperCards()).length;
   const lines = [
     "── citation status ──",
+    `  ✓ ${cardCount} paper card(s) in ${PAPERS_DIR}`,
     corpusLine,
+    await checkStore(),
+    await checkEmbedBackend(),
     await checkArraBackend(),
-    await checkLanceDB(),
-    await checkCloudEmbed(),
   ];
   const hardFail = lines.some((l) => l.includes("✗"));
   return { ok: !hardFail, output: lines.join("\n") };
@@ -651,24 +784,11 @@ async function cmdIndex(rest: string[]): Promise<PluginResult> {
   });
   if (!rows.length) return { ok: false, error: "embedding produced no rows" };
 
-  const db = await lancedb.connect(LANCEDB_DIR);
-  const tableNames = await db.tableNames();
-  if (tableNames.includes(TABLE_NAME)) {
-    const table = await db.openTable(TABLE_NAME);
-    // mergeInsert fails on a schema change (new kind/citekey/path columns), so
-    // recreate when the stored schema no longer matches what we write.
-    const stored = new Set((await table.schema()).fields.map((f) => f.name));
-    const wanted = Object.keys(rows[0]);
-    if (wanted.every((k) => stored.has(k)) && stored.size === wanted.length) {
-      await table.mergeInsert("id").whenMatchedUpdateAll().whenNotMatchedInsertAll().execute(rows);
-    } else {
-      lines.push(`(schema changed — rebuilding the "${TABLE_NAME}" table)`);
-      await db.dropTable(TABLE_NAME);
-      await db.createTable(TABLE_NAME, rows);
-    }
-  } else {
-    await db.createTable(TABLE_NAME, rows);
-  }
+  const manifest = await storeWrite(rows, await embedModelId());
+  lines.push(
+    `Wrote ${STORE_DIR} — ${manifest.count} × ${manifest.dim}-dim ` +
+      `(${(manifest.count * manifest.dim * 4 / 1024).toFixed(0)} KB), model ${manifest.model}`,
+  );
 
   const paperRows = rows.filter((r) => r.kind === "paper");
   const topics = [...new Set(paperRows.map((r) => r.topic))].sort();
@@ -697,38 +817,32 @@ async function cmdSearch(rest: string[]): Promise<PluginResult> {
   const query = rest.filter((_, i) => !strip.has(i)).join(" ");
   if (!query) return { ok: false, error: "usage: search <query> [-k N] [--json]" };
 
-  const db = await lancedb.connect(LANCEDB_DIR);
-  const tableNames = await db.tableNames();
-  if (!tableNames.includes(TABLE_NAME)) {
-    return { ok: false, error: `table "${TABLE_NAME}" doesn't exist yet — run "maw citation index" first` };
-  }
-  const table = await db.openTable(TABLE_NAME);
+  const store = await storeRead();
+  if (!store) return { ok: false, error: `nothing indexed yet — run "maw citation index" first` };
   const vector = await embedOne(query);
-  const results = await table.vectorSearch(vector).limit(k).toArray();
+  const hits = storeSearch(vector, store.vectors, store.manifest.dim, store.meta.length).slice(0, k);
+  const results = hits.map((h) => ({ ...store.meta[h.index], score: h.score }));
 
   if (json) {
-    const payload = results.map((r: Record<string, unknown>) => ({
-      distance: r._distance ?? null,
-      kind: String(r.kind ?? "paper"),
-      citekey: String(r.citekey ?? ""),
-      id: String(r.id),
-      title: String(r.title),
-      journal: String(r.journal),
-      topic: String(r.topic),
-      path: String(r.path ?? ""),
+    const payload = results.map((r) => ({
+      similarity: Number(r.score.toFixed(4)),
+      kind: r.kind || "paper",
+      citekey: r.citekey || "",
+      id: r.id,
+      title: r.title,
+      journal: r.journal,
+      topic: r.topic,
+      path: r.path || "",
     }));
     return { ok: true, output: JSON.stringify(payload, null, 2) };
   }
 
   const lines = [`Top ${results.length} result(s) for "${query}":\n`];
   for (const r of results) {
-    const kind = String(r.kind ?? "paper");
-    const tag = kind === "note" ? "📝 note" : "📄 paper";
-    const key = String(r.citekey ?? "");
-    lines.push(`  [${r._distance?.toFixed(4)}] ${tag}${key ? ` \\cite{${key}}` : ""} (${r.topic}) ${r.title}`);
-    const where = String(r.path ?? "");
-    if (String(r.journal)) lines.push(`    ${r.journal}`);
-    if (where) lines.push(`    ${where}`);
+    const tag = (r.kind || "paper") === "note" ? "📝 note" : "📄 paper";
+    lines.push(`  [${r.score.toFixed(4)}] ${tag}${r.citekey ? ` \\cite{${r.citekey}}` : ""} (${r.topic}) ${r.title}`);
+    if (r.journal) lines.push(`    ${r.journal}`);
+    if (r.path) lines.push(`    ${r.path}`);
     lines.push("");
   }
   return { ok: true, output: lines.join("\n") };
@@ -936,20 +1050,15 @@ type PageStats = {
 type BuiltPage = { html: string; nodeCount: number; topicCount: number; edgeCount: number; stats: PageStats };
 
 async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { error: string }> {
-  const db = await lancedb.connect(LANCEDB_DIR);
-  const tableNames = await db.tableNames();
-  if (!tableNames.includes(TABLE_NAME)) {
-    return { error: `table "${TABLE_NAME}" doesn't exist yet — run "maw citation index" first` };
-  }
-  const table = await db.openTable(TABLE_NAME);
+  const store = await storeRead();
+  if (!store) return { error: `nothing indexed yet — run "maw citation index" first` };
   // The constellation maps PAPERS. Vault notes may share the index (--vault) but
   // would distort a literature layout, so they are excluded here.
-  const rows = (await table.query().toArray()).filter(
-    (r: Record<string, unknown>) => String(r.kind ?? "paper") === "paper",
-  );
-  if (rows.length === 0) return { error: 'no papers in the index — run "maw citation index" first' };
-
-  const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
+  const keep = store.meta.map((m, i) => ({ m, i })).filter(({ m }) => (m.kind || "paper") === "paper");
+  if (keep.length === 0) return { error: 'no papers in the index — run "maw citation index" first' };
+  const rows = keep.map(({ m }) => m as unknown as Record<string, unknown>);
+  const dim = store.manifest.dim;
+  const vectors = keep.map(({ i }) => Array.from(store.vectors.subarray(i * dim, (i + 1) * dim)));
   const tsneStart = Date.now();
   const coords = tsne(vectors);
   const tsneMs = Date.now() - tsneStart;
@@ -1137,18 +1246,13 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
   const outArg = oIdx >= 0 ? rest[oIdx + 1] : "artifacts/citation-network.png";
   const outPath = join(repoRoot(), outArg);
 
-  const db = await lancedb.connect(LANCEDB_DIR);
-  const tableNames = await db.tableNames();
-  if (!tableNames.includes(TABLE_NAME)) {
-    return { ok: false, error: `table "${TABLE_NAME}" doesn't exist yet — run "maw citation index" first` };
-  }
-  const table = await db.openTable(TABLE_NAME);
-  const rows = (await table.query().toArray()).filter(
-    (r: Record<string, unknown>) => String(r.kind ?? "paper") === "paper",
-  );
-  if (rows.length === 0) return { ok: false, error: 'no papers in the index — run "maw citation index" first' };
-
-  const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
+  const store = await storeRead();
+  if (!store) return { ok: false, error: `nothing indexed yet — run "maw citation index" first` };
+  const keep = store.meta.map((m, i) => ({ m, i })).filter(({ m }) => (m.kind || "paper") === "paper");
+  if (keep.length === 0) return { ok: false, error: 'no papers in the index — run "maw citation index" first' };
+  const rows = keep.map(({ m }) => m as unknown as Record<string, unknown>);
+  const gdim = store.manifest.dim;
+  const vectors = keep.map(({ i }) => Array.from(store.vectors.subarray(i * gdim, (i + 1) * gdim)));
   const nodes = rows.map((r: Record<string, unknown>) => ({
     title: String(r.title),
     topic: String(r.topic),
@@ -1234,7 +1338,18 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
     `</svg>`;
 
   await mkdir(dirname(outPath), { recursive: true });
-  await sharp(Buffer.from(svg)).png().toFile(outPath);
+  // SVG always — it is dependency-free and scales. PNG only if `sharp` happens to
+  // be installed, so a zero-dependency install still produces a usable figure.
+  const svgPath = outPath.replace(/\.png$/, ".svg");
+  await Bun.write(svgPath, svg);
+  let pngNote = "";
+  try {
+    const { default: sharp } = (await import("sharp")) as { default: (b: Buffer) => { png: () => { toFile: (p: string) => Promise<unknown> } } };
+    await sharp(Buffer.from(svg)).png().toFile(outPath);
+    pngNote = `\n✦ png            → ${outPath}`;
+  } catch {
+    pngNote = `\n  (png skipped — 'sharp' not installed; the SVG above is the figure)`;
+  }
 
   // --html: also write the interactive page (same t-SNE + edges) as a portable
   // file — openable/shareable without keeping `visualize`'s server running.
@@ -1261,7 +1376,7 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
   return {
     ok: true,
     output:
-      `✦ citation graph → ${outPath}${htmlNote}\n` +
+      `✦ citation graph → ${svgPath}${pngNote}${htmlNote}\n` +
       `${nodes.length} papers · ${topics.length} topics · ${edges.length} edges (cosine > ${threshold}, max observed ${maxSim.toFixed(3)})\n` +
       (edges.length === 0
         ? `no edges at this threshold — lower it: maw citation graph --threshold ${(maxSim - 0.05).toFixed(2)}`
@@ -1290,7 +1405,10 @@ Run from inside Soul-Brews-Studio/phd-citation-oracle.
 
 Env:
   ARRA_URL              arra-oracle-v3 backend URL (default http://localhost:47778)
-  CITATION_LANCEDB_DIR  local LanceDB dir (default $MAW_HOME/citation-data/lancedb)
+  CITATION_STORE_DIR    vector store dir (default $MAW_HOME/citation-data/store)
+  CITATION_EMBED        force a backend: ollama | worker | cf-rest (default: auto-detect, ollama first)
+  OLLAMA_URL            ollama endpoint (default http://localhost:11434)
+  CITATION_OLLAMA_MODEL local embedding model (default bge-m3)
   CF_EMBED_WORKER_URL   shared local embed worker (default http://localhost:18787, no token)
   CF_EMBED_MODEL        embed model (default @cf/baai/bge-m3, 1024-dim, multilingual)
   CITATION_VISUALIZE_PORT  default port for visualize (default 5556)

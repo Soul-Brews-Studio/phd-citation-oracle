@@ -1,14 +1,12 @@
 {
-  "dependencies": {
-    "@lancedb/lancedb": "^0.31.0",
+  "name": "citation",
+  "private": true,
+  "comment": "No runtime dependencies on purpose. The vector store is plain files + brute-force cosine, embeddings come from ollama (local, GPU) or a Cloudflare worker over HTTP, and figures are SVG. `sharp` is an OPTIONAL peer: install it only if you also want PNG output.",
+  "dependencies": {},
+  "optionalDependencies": {
     "sharp": "^0.33.5"
   },
   "devDependencies": {
     "@types/bun": "^1.3.0"
-  },
-  "trustedDependencies": [
-    "onnxruntime-node",
-    "protobufjs",
-    "sharp"
-  ]
+  }
 }

@@ -13,26 +13,38 @@
 
 ## 1. Manual index ทำยังไง (คำถามหลัก)
 
-Index คือการเอาข้อความในแต่ละ card ไป **embed เป็น vector** แล้วเก็บลง LanceDB
-เพื่อให้ `search` / `graph` / `serve` ใช้งานได้ ทุกครั้งที่แก้ card ต้อง index ใหม่
+Index คือการเอาข้อความในแต่ละ card ไป **embed เป็น vector** แล้วเก็บลง store ในเครื่อง
+(`$MAW_HOME/citation-data/store/` — ไฟล์ธรรมดา 3 ไฟล์ ไม่ต้องลง database) เพื่อให้ `search` / `graph` / `serve` ใช้งานได้ ทุกครั้งที่แก้ card ต้อง index ใหม่
 
-### ก่อน index — ต้องมี embed worker รันอยู่
+### ก่อน index — ต้องมี embedder ตัวใดตัวหนึ่ง
 
-นี่คือจุดที่พลาดกันบ่อยสุด ถ้า worker ไม่รัน index จะ error ทันที เช็คก่อน:
+ตัวปลั๊กอินจะ**เลือกให้เอง** ตามลำดับนี้:
+
+| ลำดับ | Backend | เงื่อนไข | หมายเหตุ |
+|---|---|---|---|
+| 1 | **ollama** (local) | มี `bge-m3` และ ollama รันอยู่ | ใช้ GPU เครื่องเรา ไม่ต้อง token ไม่ออกเน็ต ← default |
+| 2 | Cloudflare worker | worker รันที่ `:18787` | ผ่าน wrangler login เดิม |
+| 3 | Cloudflare REST | มี `CF_ACCOUNT_ID` + `CF_API_TOKEN` | ใช้ token จริง |
+
+**แบบ local (แนะนำ)** — ครั้งแรกโหลด model เข้า GPU อาจนาน 1-2 นาที หลังจากนั้นเร็ว (~0.2s ต่อครั้ง):
 
 ```bash
-curl -s -m 5 -X POST http://localhost:18787/embed \
-  -H 'content-type: application/json' \
-  -d '{"texts":["healthcheck"],"model":"@cf/baai/bge-m3"}' | head -c 80
+ollama pull bge-m3          # 1.2 GB ครั้งเดียว
+ollama serve                # ปกติ Ollama.app รันอยู่แล้ว
 ```
 
-ได้ JSON กลับมา = พร้อม ถ้าไม่ได้ ให้เปิด worker (ใช้ตัวที่ share กันอยู่แล้ว **อย่าเปิดตัวใหม่**):
+**แบบ cloud (ถ้าไม่อยากลง model)**:
 
 ```bash
 cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787
 ```
 
-worker ตัวนี้ไม่ต้องใช้ API token — มันยืม `wrangler` login ที่ login ไว้แล้ว
+บังคับเลือกเองได้ด้วย `CITATION_EMBED=ollama|worker|cf-rest`
+
+เช็คว่าใช้ตัวไหนอยู่: `maw citation status` จะบอกบรรทัด `embeddings: ...`
+
+> ⚠️ **model ต้องไม่สลับกลางทาง** — vector จาก model ต่างกันเทียบกันไม่ได้ ตัว store จะจำ
+> `model` ที่ใช้ไว้ใน `manifest.json` ถ้าเปลี่ยน model ต้อง `index` ใหม่ทั้งชุด
 
 ### สั่ง index
 
@@ -138,7 +150,7 @@ card ตรง ๆ อย่างเดียว (card คือ canonical แ�
 ## 4. ตรวจว่างานเข้าจริง
 
 ```bash
-maw citation status                          # corpus + LanceDB + embed worker ครบไหม
+maw citation status                          # cards + store + embedder ครบไหม
 maw citation search "ที่เพิ่งเพิ่มเข้าไป" -k 5   # หาเจอไหม
 maw citation graph --threshold 0.68 --html   # ออกมาในแผนที่ไหม
 maw citation serve                           # เปิดดูแบบ interactive
@@ -152,11 +164,11 @@ maw citation serve                           # เปิดดูแบบ inter
 
 | อาการ | สาเหตุ + วิธีแก้ |
 |---|---|
-| `Local embed worker unreachable` | worker ไม่ได้รัน → เปิดตามข้อ 1 |
-| `Local embed worker failed: 500` | batch ใหญ่เกิน → `CF_EMBED_BATCH=8 maw citation index --vault` (default 16) |
+| `no embedding backend reachable` | ไม่มีทั้ง ollama และ worker → `ollama serve` หรือเปิด worker (ดูข้อ 1) |
+| embed error กลางทาง | batch ใหญ่เกิน → `CF_EMBED_BATCH=8 maw citation index --vault` (default 16) |
 | `no cards in ψ/papers and no corpus` | ยังไม่เคย generate → `maw citation cards` ก่อน |
-| `no papers in the index` | index ว่าง → `maw citation index` |
-| `(schema changed — rebuilding)` | ปกติ ไม่ใช่ error — column เปลี่ยน มันสร้าง table ใหม่ให้เอง |
+| `nothing indexed yet` | store ว่าง → `maw citation index` |
+| ผลลัพธ์แปลกๆ หลังเปลี่ยน model | vector คนละ model → `maw citation index --vault` ใหม่ทั้งชุด |
 | card ใหม่ไม่โผล่ใน graph | ลืม `kind: paper` ใน frontmatter หรือลืม index |
 | ชื่อบน graph เพี้ยน | `authors:` หรือ `year:` ว่าง → label ตกไปใช้ชื่อ journal แทน |
 
@@ -171,8 +183,30 @@ maw citation serve                           # เปิดดูแบบ inter
 rg -l 'status: needs-authors' ψ/papers/
 ```
 
-ทุก card ยัง `doi: ""` ทั้งหมด — corpus ต้นทางไม่มี DOI เลย ต้องหาเพิ่มทีหลัง (ใน page
-interactive กดชื่อ paper แล้วมีปุ่มลิงก์ไป Crossref/Scholar ให้หา DOI ได้)
+**DOI ตอนนี้มี 8/62 card** (ยืนยันกับ Crossref แล้วทุกตัว) ที่เหลือยังว่าง — corpus ต้นทาง
+ไม่มี DOI เลย เติมได้ 2 ทาง: ใน page interactive กดชื่อ paper แล้วมีปุ่มลิงก์ไป
+Crossref/Scholar หรือใช้ skill `/paper-card` แล้วสั่ง `fix-authors`
+
+```bash
+rg -c '^doi: "10\.' ψ/papers/*.md | wc -l     # นับ card ที่มี DOI แล้ว
+```
+
+---
+
+## 7. store อยู่ไหน / หน้าตายังไง
+
+ไม่ได้ใช้ database — เป็นไฟล์ธรรมดา 3 ไฟล์ ที่ `$MAW_HOME/citation-data/store/`:
+
+| ไฟล์ | คืออะไร |
+|---|---|
+| `vectors.f32` | Float32 ต่อกันเป็นแถว (N × 1024) — 73 แถวประมาณ 292 KB |
+| `meta.jsonl` | 1 บรรทัด = 1 แถว (id/kind/citekey/title/topic/path/text) เรียงตรงกับ vectors |
+| `manifest.json` | `{ model, dim, count, updated }` — จำไว้ว่า index ด้วย model ไหน |
+
+ลบทิ้งได้ตลอด แล้ว `maw citation index --vault` สร้างใหม่ (derived data — gitignored)
+
+การค้นหาเป็น brute-force cosine ใน TS ล้วน ๆ ไม่ต้องมี ANN index: 73 แถวใช้เวลา ~0.2s
+รวม embed query แล้ว ระดับหลักแสนแถวก็ยังไม่ถึงวินาที
 
 ---
 
