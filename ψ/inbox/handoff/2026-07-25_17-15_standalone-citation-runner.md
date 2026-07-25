@@ -70,7 +70,8 @@ auto-detects ollama. Verified this session.
 - [ ] Verify EPA/600/R-20/280 and EU Directive 2008/50/EC Annex I thresholds (secondary-sourced)
 - [ ] Get the parent's `artifacts/comparison/multi_source_comparison_overall.csv` so Lin's CCC,
       Bland–Altman LoA and a Deming slope can actually be computed
-- [ ] `codex login` — closes the only live-risk part of the `.codex` exposure
+- [x] `codex login` — done (2026-07-25, verified logged in). Nothing live remains from the
+      `.codex` exposure. The review-before-you-stage lesson stays; the action item is closed.
 - [ ] Optional: purge `.codex` blobs from history at `29931f8` (needs a force-push waiver)
 
 ## Key Files

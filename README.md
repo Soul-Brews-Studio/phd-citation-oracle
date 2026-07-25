@@ -20,11 +20,44 @@ that indexes the paper corpus with **neural embeddings** and renders the citatio
 ```bash
 ./bin/citation status                # ← works with NO maw installed
 ./bin/citation cards                 # JSONL → one markdown card per paper in ψ/papers/
+./bin/citation doi --write           # resolve authors + DOIs against Crossref
+./bin/citation bib                   # cards → artifacts/citation.bib
 ./bin/citation index --vault         # embed the cards + the oracle's own notes
 ./bin/citation search "biomass burning haze northern thailand"
 ./bin/citation serve                 # interactive 2D constellation
 ./bin/citation graph --threshold 0.68 --html
 ```
+
+### Just cloned it? Start here
+
+```bash
+git clone https://github.com/Soul-Brews-Studio/phd-citation-oracle
+cd phd-citation-oracle
+./bin/citation status        # tells you what's present and what's missing
+```
+
+`status` is the one command that explains itself — it prints the repo root **and how it was
+found**, the card count, DOI coverage, the vector store, your hardware, and which embedding
+backend is reachable:
+
+```
+── citation status ──
+  ✓ repo root: /…/phd-citation-oracle (walk up from the script)
+  ✓ 62 paper card(s) in ψ/papers — 61 with a DOI, all citable
+  ✓ store ready (…/.citation/store) — 62 paper(s) + 12 vault note(s) · 1024-dim · 296 KB
+  ✓ hardware: Apple M5 Max · arm64 · 18 cores · 128 GB unified memory — Metal GPU available to ollama
+  ✓ embeddings: ollama bge-m3 @ http://localhost:11434 — local, no token, no egress — 1024-dim
+      └ bge-m3:latest · 634 MB · 100% GPU (fully resident — no CPU fallback) · 8192 ctx
+```
+
+Reading and searching the corpus needs an embedding backend. The default is fully local:
+
+```bash
+ollama pull bge-m3 && ollama serve    # your own GPU, no token, nothing leaves the machine
+./bin/citation index --vault          # ~6 s for 74 items on an M5 Max
+```
+
+Only `bun` is required. There is nothing to `npm install`.
 
 `maw citation <verb>` is identical if you have [maw](https://github.com/Soul-Brews-Studio);
 both entries share one implementation. The runner walks up from its own location for

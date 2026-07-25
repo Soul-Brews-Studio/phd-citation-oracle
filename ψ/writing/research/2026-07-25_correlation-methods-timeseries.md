@@ -74,17 +74,48 @@ the defence, and it directly bounds the claim "calibration will fix it".
 
 ## 4. The regulator bar (sobering)
 
-**US EPA PM2.5 air-sensor performance targets** (EPA/600/R-20/280): precision CV ≤ 30%;
-linearity R² ≥ 0.70; bias slope 1.0 ± 0.35, intercept 0 ± 5 µg/m³; **error RMSE ≤ 7 µg/m³**
-(on ~24-h averaged collocated data).
+✅ **VERIFIED against the primary sources, 2026-07-25** — the EPA numbers below are transcribed
+from Table ES-2 of EPA/600/R-20/280 itself (the 79-page PDF, not a secondary summary), and the
+EU numbers from the Directive text on EUR-Lex (CELEX:32008L0050, Annex I Section A).
 
-> **DustBoy RMSE 37.7 is >5× the EPA target; bias +18.8 exceeds the intercept target
-> (0 ± 5) by ~4×. GEMS (27.3) is closer but also fails.** Report this honestly as a
-> bounded-use statement, not a pass.
+**US EPA PM2.5 air-sensor targets — base (field) testing**, on **24-hour averages**
+(§3.1: "the sensor and FRM/FEM data will be compared at 24-hour averages"):
+
+| Attribute | Metric | Target |
+|---|---|---|
+| Precision | SD **or** CV | SD ≤ 5 µg/m³ **-OR-** CV ≤ 30% |
+| Bias | Slope | 1.0 ± 0.35 |
+| Bias | Intercept *b* | −5 ≤ *b* ≤ 5 µg/m³ |
+| Linearity | R² | ≥ 0.70 |
+| Error | RMSE **or** NRMSE | RMSE ≤ 7 µg/m³ **-OR-** NRMSE ≤ 30% |
+
+Two corrections to how this was written before, both material:
+
+1. **The precision and error targets are disjunctive**, not single values. The report is explicit:
+   "A sensor will meet this target if either the RMSE or NRMSE meet this criterion." Quoting
+   RMSE ≤ 7 alone overstates the bar.
+2. **NRMSE normalises by the reference mean**, not by range:
+   `NRMSE = RMSE / mean(valid 24-h FRM/FEM PM2.5 over the whole test period) × 100`.
+   This matters here, because a high-concentration site can pass on NRMSE while failing RMSE.
+
+> **DustBoy RMSE 37.7 µg/m³ fails the RMSE ≤ 7 target by >5×.** It could only pass on the NRMSE
+> limb if the reference period mean exceeded **≈126 µg/m³** (37.7 / 0.30) — far above any plausible
+> season-long mean for northern Thailand, even with burning-season daily peaks above that. So the
+> failure holds, but state it as "fails both limbs of the EPA error target, the NRMSE limb by
+> construction", not as "5× the target" alone. Bias +18.8 also exceeds the intercept window
+> (−5 to 5) by ~4×. GEMS (27.3) is closer and also fails.
+> Report as a bounded-use statement, not a pass.
+
+**EU Directive 2008/50/EC, Annex I §A — PM10/PM2.5** (the Directive lists both together):
+
+| Measurement type | Relative expanded uncertainty | Min. data capture | Min. time coverage |
+|---|---|---|---|
+| Fixed | 25% | 90% | — |
+| Indicative | 50% | 90% | 14% |
 
 - Duvall, R. et al. (2021). *Performance Testing Protocols, Metrics, and Target Values for
-  Fine Particulate Matter Air Sensors*. EPA/600/R-20/280, US EPA ORD.
-- Directive 2008/50/EC, Annex I — EU Data Quality Objectives (indicative measurements)
+  Fine Particulate Matter Air Sensors*. EPA/600/R-20/280, US EPA ORD. Table ES-2 / Table 4-2.
+- Directive 2008/50/EC, Annex I §A — EU Data Quality Objectives (verified on EUR-Lex)
 - CEN/TS 17660-2:2024/2025 — Performance evaluation of air-quality sensor systems, PM
 - ASTM D8406-22; South Coast AQMD **AQ-SPEC** field/lab protocols (R² ≥ 0.8 screening)
 
@@ -134,11 +165,13 @@ linearity R² ≥ 0.70; bias slope 1.0 ± 0.35, intercept 0 ± 5 µg/m³; **erro
 
 ## 8. Honest flags (do not skip before citing)
 
-- ⚠️ The **exact EPA numeric targets** (CV≤30%, R²≥0.70, slope 1±0.35, intercept 0±5,
-  RMSE≤7) were corroborated only via secondary sources. **Pull EPA/600/R-20/280 itself
-  before quoting.**
-- ⚠️ The **EU Annex I relative expanded uncertainty %** for PM2.5 (indicative vs fixed)
-  was not verified against the Directive text. Pull Annex I directly.
+- ✅ **RESOLVED 2026-07-25** — the EPA numeric targets are now taken from Table ES-2 of
+  EPA/600/R-20/280 itself. The secondary summary was substantively right but **understated
+  the bar in two ways**: precision is `SD ≤ 5 µg/m³ OR CV ≤ 30%`, and error is
+  `RMSE ≤ 7 µg/m³ OR NRMSE ≤ 30%` — either limb passes. See §4.
+- ✅ **RESOLVED 2026-07-25** — EU Annex I §A verified on EUR-Lex (CELEX:32008L0050):
+  PM10/PM2.5 fixed **25%**, indicative **50%**, data capture **90%**, indicative time
+  coverage **14%**. See §4.
 - ⚠️ **CCC, Bland–Altman LoA and Deming slope cannot be computed from r/bias/RMSE alone** —
   they need each series' standard deviation or the raw paired data. Get the paired data
   from the parent oracle (`artifacts/comparison/multi_source_comparison_overall.csv`).
