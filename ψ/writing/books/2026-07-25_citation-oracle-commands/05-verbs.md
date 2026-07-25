@@ -95,8 +95,7 @@ corpus มีไฟล์เดียว)
 ```
 
 0.76 ต่ำกว่าเกณฑ์ 0.85 — ปล่อยว่างดีกว่าผูก DOI ผิด ใบเดียวใน 62
-ที่ยังไม่มี DOI (ตีพิมพ์ใน Chemical Engineering Transactions ที่
-Crossref ไม่ครอบคลุม)
+ที่ยังไม่มี DOI (ตีพิมพ์ใน Chemical Engineering Transactions)
 
 default คือทุกใบที่ DOI/ผู้แต่งไม่ครบ ไม่ใช่ทั้ง 62 ใบ
 
@@ -136,9 +135,8 @@ flag เดียว — `--by-topic` จัดกลุ่มตาม 6 หั
 
 ## 5.5 `index` / `search` — `--vault` รวม paper กับ note
 
-`index` แปลงข้อความการ์ดเป็นเวกเตอร์ 1024 มิติผ่าน ollama ทำหลัง
-`cards` เสร็จ ทำซ้ำเมื่อแก้ title/summary/relevance (`doi:`
-ไม่ต้อง — ไม่ถูก embed)
+`index` แปลงข้อความการ์ดเป็นเวกเตอร์ 1024 มิติผ่าน ollama ทำซ้ำ
+เมื่อแก้ title/summary/relevance (`doi:` ไม่ต้อง — ไม่ถูก embed)
 
 ```bash
 ./bin/citation index --vault

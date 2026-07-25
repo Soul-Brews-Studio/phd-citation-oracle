@@ -65,11 +65,11 @@ author/title/journal/year — citable ปกติ
 }
 ```
 
-entry ที่ไม่มี `note` = การ์ดที่ยังไม่ verify — ทั้งคลัง 62 ใบ
-เจอแค่ใบนี้ใบเดียว
+entry ที่ไม่มี `note` = ยังไม่ verify — ทั้งคลัง 62 ใบ เจอแค่
+ใบเดียว
 
-การ์ดที่ขาด field จำเป็นจะไม่หาย แต่ถูกเขียนเป็น comment
-ท้ายไฟล์แทน (Rule 1) — ตอนนี้ทั้ง 62 การ์ดครบ ไม่มี withheld
+การ์ดที่ขาด field จำเป็นไม่หาย แต่เขียนเป็น comment ท้ายไฟล์
+แทน (Rule 1) — ตอนนี้ทั้ง 62 การ์ดครบ ไม่มี withheld
 
 ## 15.4 ยืนยันด้วย bibtex จริง
 
@@ -102,8 +102,8 @@ diff การ์ดกับก่อน verify (`051014b`) แยก error จ
 volume) นอกจากนี้มี 8 benign + 2 reformat ไม่นับ
 
 เคสหนักสุด: `buya2023` กับ `wongnakae2023` — citekey เดิมมาจาก
-"Amnuaylojaroen, T." ที่ไม่อยู่ใน author list จริงเลย เอา
-author ผิดใบมาแปะ
+"Amnuaylojaroen, T." ที่ไม่อยู่ใน author list จริง เอา author
+ผิดใบมาแปะ
 
 การ์ดที่ rekey เก็บ citekey เดิมไว้ที่ `aka:` — `buya2025`
 มี `aka: taneepanichskuld2025` ไม่มีใบไหนถูกลบทิ้ง
