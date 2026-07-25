@@ -126,12 +126,32 @@ Findings from delegated deep-research runs, kept with their uncertainty flags in
 
 ### The corpus
 
-[`ψ/papers/`](ψ/papers/) — **62 markdown cards**, 8 with Crossref-verified DOIs, across
+[`ψ/papers/`](ψ/papers/) — **62 markdown cards, 61 with a Crossref-verified DOI**, across
 six topics (low-cost sensor calibration, satellite PM2.5 products, Thailand burning season,
 health policy, reference monitoring/BAM, multi-source fusion). Seeded from the parent oracle's
 [`literature_corpus.jsonl`](artifacts/literature_corpus.jsonl) (56 papers), then extended by
-ingesting external research. Nine cards are flagged `needs-authors` because the upstream
-reference list literally reads `[Authors]` — honest placeholders, not bugs.
+ingesting external research.
+
+The 62nd is `jarernwong2021`, in *Chemical Engineering Transactions* — a journal Crossref does
+not index. It stays DOI-less rather than acquiring a guessed one.
+
+### The bibliography — [`artifacts/citation.bib`](artifacts/citation.bib)
+
+62 entries, validated under real `bibtex` (TeX Live 2026): 62 `\bibitem` produced, zero warnings.
+
+Getting there meant checking the corpus against Crossref, which found **18 errors across 14
+cards** — every one of which would otherwise have shipped into a thesis bibliography. Seven
+papers were credited to the wrong first author (one to the paper's *last* author, misspelled).
+One card carried a title an outside AI report had invented, attached to a DOI that was correct
+all along — nobody had compared the two. Four had page numbers taken from the digits in their own
+DOI. Every correction is listed, with the old citekey, in
+[`artifacts/citation-audit.md`](artifacts/citation-audit.md).
+
+Nothing was overwritten silently: a corrected byline keeps the old claim in `authors_upstream:`,
+and a renamed card keeps its old key in `aka:`.
+
+> **The general lesson, if you take one thing from this repo:** a citation that looks right is not
+> a citation that is right. All 18 were invisible until an external authority was consulted.
 
 ## Honest caveats
 
