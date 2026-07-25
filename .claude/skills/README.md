@@ -10,6 +10,7 @@ frontmatter; nothing here is specific to our infrastructure except where noted.
 |-------|--------------|
 | [`gemini-deep-research`](gemini-deep-research/SKILL.md) | Interactively builds a high-quality prompt for **Google Gemini Deep Research** (or any agentic deep-research tool) — scoping questions → a copy-paste research brief with objective, explicit out-of-scope list, source-quality bar, named output sections, citation rules and uncertainty flags. Domain-agnostic. |
 | [`paper-card`](paper-card/SKILL.md) | **Import** papers into a markdown-card corpus (from a pasted citation, BibTeX, DOI, bare title, PDF, or a whole deep-research bibliography — deduping first via Crossref + semantic search) and **export** back out to BibTeX/CSV/comparison tables. Refuses to invent DOIs or author lists; flags gaps instead. Pairs with `gemini-deep-research`: that one gets you a bibliography, this one files it. |
+| [`research-ingest`](research-ingest/SKILL.md) | **Absorb** a deep-research report produced elsewhere (Gemini/ChatGPT/Perplexity) into the vault and the local LanceDB: file it verbatim with provenance, extract the bibliography, **verify every supplied DOI against Crossref before it touches a card**, reconcile against the existing corpus (enrich / create / hold), re-index, then prove it searchable. Completes the loop with `gemini-deep-research` and `paper-card`. |
 
 ### `gemini-deep-research` layout
 
