@@ -1,0 +1,54 @@
+{
+  "skill_name": "gemini-deep-research",
+  "notes": "Test prompts for the skill. Each should end with a copy-paste brief in a single fenced block, a saved file, and a note telling the user to review the generated plan before approving it. Assertions are deliberately about brief STRUCTURE, not subject matter — the skill must work on any topic.",
+  "evals": [
+    {
+      "id": 1,
+      "name": "engineering-comparison-casual",
+      "prompt": "ok so we're on elasticsearch for search, about 40M docs, and honestly the ops burden is killing us. someone on the team keeps pushing typesense. before I let this become a whole quarter of work I want gemini to actually dig into real benchmarks and not just vendor marketing pages. can you write me something I can paste in?",
+      "expected_output": "A scoping round (or stated defaults), then a copy-paste brief with: one-sentence objective naming the decision; explicit out-of-scope list; a source bar that names vendor marketing as disallowed or requires it be labelled vendor-run; named ordered output sections including a comparison table and a 'could not verify' section; a rule against comparing benchmark numbers measured under different conditions; DOI/URL citation requirement with a no-fabrication clause. Saved to a file. Handover note says to review the generated plan before approving.",
+      "assertions": [
+        "Output contains exactly one fenced code block holding the complete brief",
+        "Brief states the objective in a single sentence and names the decision it serves",
+        "Brief contains an explicit out-of-scope or exclusions list",
+        "Brief's source-quality section names disallowed source types, not only preferred ones",
+        "Brief names output sections in an explicit order",
+        "Brief includes a section for what could not be verified",
+        "Brief forbids inventing citations/DOIs and requires DOI or direct URL",
+        "The brief is saved to a file and the path is reported",
+        "Handover instructs the user to review/edit the generated research plan before approving"
+      ],
+      "files": []
+    },
+    {
+      "id": 2,
+      "name": "verification-of-secondhand-numbers",
+      "prompt": "I've got three thresholds in my draft that I pulled from a blog post and my advisor is going to ask where they came from. I need the primary sources, not another summary. Can you make me a gemini deep research prompt that verifies them properly?",
+      "expected_output": "Recognises this as the narrow-verification shape. Asks for the three figures verbatim (with units) if not supplied. Brief defines what counts as confirmation (issuing body's own document; a third-party quote does not count), makes 'not found' an acceptable well-specified outcome, and asks for a status table with document/section/URL per figure. Should not balloon into a literature survey.",
+      "assertions": [
+        "Skill asks for the exact figures with units, or uses figures supplied by the user verbatim",
+        "Brief states that a number quoted by a third party does not count as confirmation",
+        "Brief makes 'not found' an explicitly acceptable outcome rather than requiring an answer",
+        "Brief requests document title, section/page and direct URL per verified figure",
+        "Brief stays scoped to verification and does not request a broad literature survey",
+        "Output contains exactly one fenced code block holding the complete brief"
+      ],
+      "files": []
+    },
+    {
+      "id": 3,
+      "name": "thai-request-market-landscape",
+      "prompt": "ทำ prompt ให้ gemini deep research หน่อย เรื่อง carbon credit registry standards ที่ใช้กันในเอเชีย ต้องเอาไปเสนอทีมสัปดาห์หน้า อยากได้ตารางเทียบด้วย",
+      "expected_output": "Responds in Thai. Treats it as a landscape-survey shape narrowing to a comparison. Brief includes geography scope (Asia) with explicit exclusions, a comparison table with named columns, source bar preferring registry/standards-body primary documents over vendor material, and a 'sources disagree' section. Notes the audience is the user's team and the decision it supports.",
+      "assertions": [
+        "Reply to the user is in Thai",
+        "Brief includes an explicit geographic scope and exclusions",
+        "Brief requests a comparison table with named columns",
+        "Brief prefers primary standards-body or registry documents over vendor/marketing material",
+        "Brief includes a section surfacing disagreement between sources",
+        "Output contains exactly one fenced code block holding the complete brief"
+      ],
+      "files": []
+    }
+  ]
+}
