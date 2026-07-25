@@ -23,6 +23,12 @@ const EMBED_MODEL = process.env.CF_EMBED_MODEL || "@cf/baai/bge-m3";
 const EMBED_DIM = 1024;
 const DEFAULT_CORPUS = "artifacts/literature_corpus.jsonl";
 
+// Professional type pairing (matches the oracle book skills' book-feel): a
+// journal serif for titles, a clean humanist sans for labels/UI. Both ship with
+// macOS so sharp/librsvg and the browser resolve them without downloads.
+const FONT_SERIF = "Charter, 'Iowan Old Style', Georgia, 'Times New Roman', serif";
+const FONT_SANS = "'Helvetica Neue', Helvetica, 'Segoe UI', Arial, sans-serif";
+
 // ── embedding (shared local wrangler-dev worker, no API token) ──
 
 async function embedTexts(texts: string[]): Promise<number[][]> {
@@ -302,6 +308,119 @@ function pcaND(vectors: number[][], k: number): number[][] {
   return Array.from({ length: n }, (_, i) => components.map(({ vec, val }) => vec[i] * Math.sqrt(Math.max(val, 0))));
 }
 
+// ── t-SNE — spread layout so clusters separate and labels stop colliding ──
+// Classic van der Maaten t-SNE, PCA-initialised so it's deterministic (no RNG).
+// n≈56 papers → the O(n²) form is instant; no Barnes-Hut needed.
+function tsne(X: number[][], opts: { perplexity?: number; iters?: number } = {}): number[][] {
+  const n = X.length;
+  if (n === 0) return [];
+  if (n <= 2) return X.map((_, i) => [i, 0]);
+  const perp = opts.perplexity ?? Math.max(5, Math.min(20, Math.floor(n / 3)));
+  const iters = opts.iters ?? 700;
+
+  const D: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) {
+      let s = 0;
+      for (let d = 0; d < X[i].length; d++) {
+        const diff = X[i][d] - X[j][d];
+        s += diff * diff;
+      }
+      D[i][j] = s;
+      D[j][i] = s;
+    }
+  }
+
+  // P_{j|i}: per-point binary search on beta (=1/2σ²) to hit target perplexity.
+  const P: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+  const logU = Math.log(perp);
+  for (let i = 0; i < n; i++) {
+    let betaMin = -Infinity, betaMax = Infinity, beta = 1;
+    const prow = new Array(n).fill(0);
+    for (let iter = 0; iter < 50; iter++) {
+      let sum = 0;
+      for (let j = 0; j < n; j++) {
+        prow[j] = i === j ? 0 : Math.exp(-D[i][j] * beta);
+        sum += prow[j];
+      }
+      sum = sum || 1e-12;
+      let H = 0;
+      for (let j = 0; j < n; j++) {
+        const p = prow[j] / sum;
+        if (p > 1e-12) H -= p * Math.log(p);
+      }
+      const diff = H - logU;
+      if (Math.abs(diff) < 1e-5) break;
+      if (diff > 0) {
+        betaMin = beta;
+        beta = betaMax === Infinity ? beta * 2 : (beta + betaMax) / 2;
+      } else {
+        betaMax = beta;
+        beta = betaMin === -Infinity ? beta / 2 : (beta + betaMin) / 2;
+      }
+    }
+    let sum = 0;
+    for (let j = 0; j < n; j++) sum += prow[j];
+    sum = sum || 1e-12;
+    for (let j = 0; j < n; j++) P[i][j] = prow[j] / sum;
+  }
+
+  // symmetrize + normalize into P2
+  const P2: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+  let psum = 0;
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { P2[i][j] = P[i][j] + P[j][i]; psum += P2[i][j]; }
+  psum = psum || 1e-12;
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) P2[i][j] = Math.max(P2[i][j] / psum, 1e-12);
+
+  // init from PCA (deterministic), scaled small so early exaggeration dominates
+  const pca = pcaND(X, 2);
+  let Y = pca.map((c) => [c[0] ?? 0, c[1] ?? 0]);
+  let mxInit = 0;
+  for (const y of Y) mxInit = Math.max(mxInit, Math.abs(y[0]), Math.abs(y[1]));
+  const f = mxInit > 0 ? 1e-4 / mxInit : 1;
+  Y = Y.map((y) => [y[0] * f, y[1] * f]);
+
+  const gains = Array.from({ length: n }, () => [1, 1]);
+  const inc = Array.from({ length: n }, () => [0, 0]);
+  // Small learning rate — for n≈56 the classic lr=200 diverges (a few points
+  // shoot out, the rest collapse). ~15 (karpathy tsnejs range) stays stable.
+  const lr = 15, exagg = 4, exaggEnd = 100;
+
+  for (let iter = 0; iter < iters; iter++) {
+    const num: number[][] = Array.from({ length: n }, () => new Array(n).fill(0));
+    let qsum = 0;
+    for (let i = 0; i < n; i++) for (let j = i + 1; j < n; j++) {
+      const dx = Y[i][0] - Y[j][0], dy = Y[i][1] - Y[j][1];
+      const q = 1 / (1 + dx * dx + dy * dy);
+      num[i][j] = q; num[j][i] = q; qsum += 2 * q;
+    }
+    qsum = qsum || 1e-12;
+    const momentum = iter < 250 ? 0.5 : 0.8;
+    for (let i = 0; i < n; i++) {
+      let gx = 0, gy = 0;
+      for (let j = 0; j < n; j++) {
+        if (i === j) continue;
+        const pij = (iter < exaggEnd ? exagg : 1) * P2[i][j];
+        const qij = num[i][j] / qsum;
+        const mult = (pij - qij) * num[i][j];
+        gx += mult * (Y[i][0] - Y[j][0]);
+        gy += mult * (Y[i][1] - Y[j][1]);
+      }
+      gx *= 4; gy *= 4;
+      gains[i][0] = Math.max(0.01, Math.sign(gx) === Math.sign(inc[i][0]) ? gains[i][0] * 0.8 : gains[i][0] + 0.2);
+      gains[i][1] = Math.max(0.01, Math.sign(gy) === Math.sign(inc[i][1]) ? gains[i][1] * 0.8 : gains[i][1] + 0.2);
+      inc[i][0] = momentum * inc[i][0] - lr * gains[i][0] * gx;
+      inc[i][1] = momentum * inc[i][1] - lr * gains[i][1] * gy;
+      Y[i][0] += inc[i][0];
+      Y[i][1] += inc[i][1];
+    }
+    let mx = 0, my = 0;
+    for (const y of Y) { mx += y[0] / n; my += y[1] / n; }
+    for (const y of Y) { y[0] -= mx; y[1] -= my; }
+  }
+  return Y;
+}
+
 function escapeHtml(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
@@ -309,6 +428,8 @@ function escapeHtml(s: string): string {
 async function cmdVisualize(rest: string[]): Promise<PluginResult> {
   const portFlagIndex = rest.indexOf("--port");
   const port = portFlagIndex >= 0 ? Number(rest[portFlagIndex + 1]) : Number(process.env.CITATION_VISUALIZE_PORT) || 5556;
+  const tIdx = rest.indexOf("--threshold");
+  const threshold = tIdx >= 0 ? Number(rest[tIdx + 1]) : 0.68;
 
   const db = await lancedb.connect(LANCEDB_DIR);
   const tableNames = await db.tableNames();
@@ -320,236 +441,176 @@ async function cmdVisualize(rest: string[]): Promise<PluginResult> {
   if (rows.length === 0) return { ok: false, error: 'index is empty — run "maw citation index" first' };
 
   const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
-  const coords = pcaND(vectors, 3);
+  const coords = tsne(vectors);
 
-  const points = rows.map((r: Record<string, unknown>, i: number) => ({
-    x: coords[i]?.[0] ?? 0,
-    y: coords[i]?.[1] ?? 0,
-    z: coords[i]?.[2] ?? 0,
-    title: String(r.title),
-    journal: String(r.journal),
-    topic: String(r.topic),
+  // Same t-SNE + robust percentile scaling as `graph`, into a virtual canvas.
+  const VW = 2000, VH = 1300, M = 90;
+  const pct = (arr: number[], p: number) => {
+    const s = [...arr].sort((a, b) => a - b);
+    return s[Math.max(0, Math.min(s.length - 1, Math.floor((p / 100) * (s.length - 1))))];
+  };
+  const xs = coords.map((c) => c[0] ?? 0), ys = coords.map((c) => c[1] ?? 0);
+  const minX = pct(xs, 2), maxX = pct(xs, 98), minY = pct(ys, 2), maxY = pct(ys, 98);
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const px = coords.map((c) => M + ((clamp(c[0] ?? 0, minX, maxX) - minX) / (maxX - minX || 1)) * (VW - 2 * M));
+  const py = coords.map((c) => VH - M - ((clamp(c[1] ?? 0, minY, maxY) - minY) / (maxY - minY || 1)) * (VH - 2 * M));
+
+  const nodes = rows.map((r: Record<string, unknown>, i: number) => ({
+    x: px[i], y: py[i],
+    title: String(r.title), journal: String(r.journal), topic: String(r.topic),
+    label: shortLabel(String(r.title)),
   }));
+  const topics = [...new Set(nodes.map((n) => n.topic))].sort();
+  const palette = ["#2ca88f", "#e8724c", "#5b74c9", "#d94f9a", "#7bc043", "#f2c53d", "#c9a66b", "#9aa0a6"];
+  const colorFor = (t: string) => palette[topics.indexOf(t) % palette.length];
+  const colorMap = Object.fromEntries(topics.map((t) => [t, colorFor(t)]));
 
-  const topics = [...new Set(points.map((p) => p.topic))].sort();
-  const palette = ["#7c3aed", "#0ea5e9", "#10b981", "#f59e0b", "#ef4444", "#ec4899", "#14b8a6", "#a3e635"];
-  const colorFor = (topic: string) => palette[topics.indexOf(topic) % palette.length];
+  const edges: Array<{ i: number; j: number; s: number }> = [];
+  for (let i = 0; i < vectors.length; i++) {
+    for (let j = i + 1; j < vectors.length; j++) {
+      const s = cosine(vectors[i], vectors[j]);
+      if (s > threshold) edges.push({ i, j, s });
+    }
+  }
+
+  const legendRows = topics
+    .map((t) => {
+      const n = nodes.filter((x) => x.topic === t).length;
+      return `<div class="item"><span class="sw" style="background:${colorFor(t)}"></span>${escapeHtml(t)} (${n})</div>`;
+    })
+    .join("");
 
   const html = `<!doctype html>
-<html><head><meta charset="utf-8"><title>citation constellation — ${points.length} papers (3D)</title>
+<html><head><meta charset="utf-8"><title>citation constellation — ${nodes.length} papers</title>
 <style>
-  html, body { margin:0; height:100%; overflow:hidden; font-family: ui-sans-serif, system-ui, sans-serif; background:#05060d; color:#e5e7eb; }
-  canvas { display:block; cursor: grab; }
-  canvas:active { cursor: grabbing; }
-  #tooltip {
-    position: fixed; max-width: 440px; background: rgba(12,14,30,0.97); border: 1px solid rgba(125,155,255,0.45);
-    border-radius: 10px; padding: 12px 14px; font-size: 13px; line-height: 1.5; pointer-events: none;
-    display: none; box-shadow: 0 8px 32px rgba(0,0,0,0.6); z-index: 10;
-  }
-  #tooltip .topic { color: #93c5fd; font-weight: 600; font-size: 11px; text-transform: uppercase; letter-spacing: .04em; margin-bottom: 6px; }
-  #tooltip .journal { color: #94a3b8; font-size: 12px; margin-top: 6px; }
-  #legend { position: fixed; top: 16px; left: 16px; background: rgba(12,14,30,0.9); border: 1px solid rgba(125,155,255,0.3);
-    border-radius: 10px; padding: 12px 14px; font-size: 12px; max-height: 80vh; overflow-y: auto; }
-  #legend .item { display: flex; align-items: center; gap: 6px; margin: 4px 0; white-space: nowrap; }
-  #legend .swatch { width: 10px; height: 10px; border-radius: 50%; flex-shrink: 0; }
-  h1 { position: fixed; top: 16px; right: 16px; font-size: 14px; font-weight: 500; color: #9ca3af; margin: 0; text-align: right; }
-  h1 small { display: block; font-size: 11px; color: #6b7280; margin-top: 4px; font-weight: 400; }
-  #search-box { position: fixed; top: 16px; left: 50%; transform: translateX(-50%); display: flex; gap: 6px; z-index: 5; }
-  #search-box input { width: 340px; background: rgba(12,14,30,0.9); border: 1px solid rgba(125,155,255,0.3);
-    border-radius: 8px; padding: 8px 12px; color: #e5e7eb; font-size: 13px; outline: none; }
-  #search-box input:focus { border-color: #7d9bff; }
-  #search-box button { background: rgba(12,14,30,0.9); border: 1px solid rgba(125,155,255,0.3); border-radius: 8px;
-    color: #9ca3af; cursor: pointer; padding: 0 12px; font-size: 13px; }
-  #results { position: fixed; top: 64px; left: 50%; transform: translateX(-50%); width: 400px; max-height: 60vh;
-    overflow-y: auto; background: rgba(12,14,30,0.95); border: 1px solid rgba(125,155,255,0.3); border-radius: 10px;
-    padding: 8px; font-size: 12px; display: none; }
-  #results.show { display: block; }
-  #results .r-title { color: #9ca3af; padding: 4px 8px 8px; font-size: 11px; }
-  #results .r-item { display: flex; gap: 8px; align-items: baseline; padding: 6px 8px; border-radius: 6px; cursor: pointer; }
-  #results .r-item:hover { background: rgba(125,155,255,0.15); }
-  #results .r-score { color: #34d399; font-variant-numeric: tabular-nums; font-weight: 600; flex-shrink: 0; }
-  #results .r-path { color: #d1d5db; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  #results .r-err { color: #f87171; padding: 8px; }
+  html,body{margin:0;height:100%;overflow:hidden;font-family:${FONT_SANS};background:#ffffff;color:#1a1a2e;}
+  #svg{display:block;width:100vw;height:100vh;cursor:grab;background:#ffffff;}
+  #svg.drag{cursor:grabbing;}
+  text{user-select:none;pointer-events:none;font-family:${FONT_SANS};}
+  #legend{position:fixed;top:16px;left:16px;background:rgba(255,255,255,.95);border:1px solid #d7dbe0;border-radius:10px;padding:12px 14px;font-size:13px;box-shadow:0 4px 20px rgba(0,0,0,.08);}
+  #legend h3{margin:0 0 8px;font-size:16px;font-family:${FONT_SERIF};}
+  #legend .item{display:flex;align-items:center;gap:7px;margin:4px 0;white-space:nowrap;}
+  #legend .sw{width:11px;height:11px;border-radius:50%;flex-shrink:0;}
+  #title{position:fixed;top:16px;left:50%;transform:translateX(-50%);font-size:22px;font-weight:700;color:#141428;text-align:center;font-family:${FONT_SERIF};}
+  #title small{display:block;font-size:12px;font-weight:400;color:#6b7280;margin-top:2px;}
+  #searchbar{position:fixed;top:64px;right:16px;display:flex;gap:6px;}
+  #searchbar input{width:280px;border:1px solid #cfd4da;border-radius:8px;padding:8px 12px;font-size:13px;outline:none;}
+  #searchbar input:focus{border-color:#5b74c9;}
+  #searchbar button{border:1px solid #cfd4da;border-radius:8px;background:#fff;cursor:pointer;padding:0 12px;color:#6b7280;}
+  #results{position:fixed;top:104px;right:16px;width:320px;max-height:60vh;overflow-y:auto;background:rgba(255,255,255,.97);border:1px solid #d7dbe0;border-radius:10px;padding:6px;font-size:12px;display:none;box-shadow:0 4px 20px rgba(0,0,0,.1);}
+  #results.show{display:block;}
+  #results .rt{color:#6b7280;padding:4px 8px;}
+  #results .ri{display:flex;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;}
+  #results .ri:hover{background:#eef1f8;}
+  #results .rs{color:#0f9d58;font-weight:700;font-variant-numeric:tabular-nums;}
+  #tip{position:fixed;max-width:420px;background:rgba(20,20,35,.96);color:#f1f3f8;border-radius:9px;padding:10px 13px;font-size:13px;line-height:1.5;pointer-events:none;display:none;z-index:20;box-shadow:0 8px 30px rgba(0,0,0,.35);}
+  #tip .tp{color:#93c5fd;font-size:11px;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;}
+  #tip .tj{color:#9aa3b2;font-size:12px;margin-top:5px;}
+  #hint{position:fixed;bottom:14px;left:16px;font-size:12px;color:#9aa0a6;}
 </style></head>
 <body>
-<h1>citation constellation — ${points.length} papers · ${topics.length} topics<small>PCA 3D · drag to orbit · scroll to zoom</small></h1>
-<div id="legend">${topics.map((t) => `<div class="item"><span class="swatch" style="background:${colorFor(t)}"></span>${escapeHtml(t)}</div>`).join("")}</div>
-<div id="search-box">
-  <input id="search-input" type="text" placeholder="Search the literature… (Enter)" />
-  <button id="search-clear" title="Clear">✕</button>
-</div>
+<div id="title">✦ Citation Constellation<small>bge-m3 · t-SNE · ${nodes.length} papers · ${edges.length} edges (sim &gt; ${threshold})</small></div>
+<div id="legend"><h3>Research Clusters</h3>${legendRows}</div>
+<div id="searchbar"><input id="q" placeholder="Search the literature… (Enter)"/><button id="clr">✕</button></div>
 <div id="results"></div>
-<div id="tooltip"></div>
-<script type="importmap">
-{ "imports": {
-  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
-  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
-} }
-</script>
-<script type="module">
-import * as THREE from 'three';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+<div id="tip"></div>
+<div id="hint">drag to pan · scroll to zoom · hover a star for the paper · search to highlight</div>
+<svg id="svg" viewBox="0 0 ${VW} ${VH}" preserveAspectRatio="xMidYMid meet"></svg>
+<script>
+const NODES=${JSON.stringify(nodes)};
+const EDGES=${JSON.stringify(edges)};
+const VECTORS=${JSON.stringify(vectors)};
+const COLORS=${JSON.stringify(colorMap)};
+const WORKER=${JSON.stringify(LOCAL_WORKER_URL)};
+const MODEL=${JSON.stringify(EMBED_MODEL)};
+const VW=${VW}, VH=${VH};
+const SVGNS="http://www.w3.org/2000/svg";
+const svg=document.getElementById('svg');
+const tip=document.getElementById('tip');
+const resultsEl=document.getElementById('results');
 
-const points = ${JSON.stringify(points)};
-const vectors = ${JSON.stringify(vectors)};
-const colors = ${JSON.stringify(Object.fromEntries(topics.map((t) => [t, colorFor(t)])))};
-const LOCAL_WORKER_URL = ${JSON.stringify(LOCAL_WORKER_URL)};
-const EMBED_MODEL = ${JSON.stringify(EMBED_MODEL)};
-const tooltip = document.getElementById('tooltip');
-const searchInput = document.getElementById('search-input');
-const searchClear = document.getElementById('search-clear');
-const resultsEl = document.getElementById('results');
-
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x05060d);
-
-const camera = new THREE.PerspectiveCamera(60, innerWidth / innerHeight, 0.1, 5000);
-const renderer = new THREE.WebGLRenderer({ antialias: true });
-renderer.setSize(innerWidth, innerHeight);
-renderer.setPixelRatio(devicePixelRatio);
-document.body.appendChild(renderer.domElement);
-
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-
-const xs = points.map(p => p.x), ys = points.map(p => p.y), zs = points.map(p => p.z);
-const span = Math.max(...xs) - Math.min(...xs), spanY = Math.max(...ys) - Math.min(...ys), spanZ = Math.max(...zs) - Math.min(...zs);
-const scale = 40 / (Math.max(span, spanY, spanZ) || 1);
-
-const geometry = new THREE.BufferGeometry();
-const positions = new Float32Array(points.length * 3);
-const colorArr = new Float32Array(points.length * 3);
-const tmpColor = new THREE.Color();
-points.forEach((p, i) => {
-  positions[i * 3] = p.x * scale;
-  positions[i * 3 + 1] = p.y * scale;
-  positions[i * 3 + 2] = p.z * scale;
-  tmpColor.set(colors[p.topic] || '#94a3b8');
-  colorArr[i * 3] = tmpColor.r; colorArr[i * 3 + 1] = tmpColor.g; colorArr[i * 3 + 2] = tmpColor.b;
+// edges
+const gEdges=document.createElementNS(SVGNS,'g');
+svg.appendChild(gEdges);
+for(const e of EDGES){
+  const a=NODES[e.i],b=NODES[e.j];
+  const ln=document.createElementNS(SVGNS,'line');
+  ln.setAttribute('x1',a.x);ln.setAttribute('y1',a.y);ln.setAttribute('x2',b.x);ln.setAttribute('y2',b.y);
+  ln.setAttribute('stroke','#9aa3ad');
+  ln.setAttribute('stroke-width',(0.6+(e.s-0.5)*5).toFixed(2));
+  ln.setAttribute('stroke-opacity',Math.min(0.5,(e.s-0.5)+0.12).toFixed(3));
+  gEdges.appendChild(ln);
+}
+// nodes + labels
+const gNodes=document.createElementNS(SVGNS,'g');
+svg.appendChild(gNodes);
+const circles=[];
+NODES.forEach((n,i)=>{
+  const t=document.createElementNS(SVGNS,'text');
+  t.setAttribute('x',n.x);t.setAttribute('y', (i%2===0? n.y-14 : n.y+22));
+  t.setAttribute('font-size','15');t.setAttribute('text-anchor','middle');t.setAttribute('fill','#1a1a2e');
+  t.setAttribute('paint-order','stroke');t.setAttribute('stroke','#ffffff');t.setAttribute('stroke-width','3.5');t.setAttribute('stroke-linejoin','round');
+  t.textContent=n.label;
+  gNodes.appendChild(t);
+  const c=document.createElementNS(SVGNS,'circle');
+  c.setAttribute('cx',n.x);c.setAttribute('cy',n.y);c.setAttribute('r','9');
+  c.setAttribute('fill',COLORS[n.topic]||'#94a3b8');c.setAttribute('stroke','#fff');c.setAttribute('stroke-width','1.5');
+  c.style.cursor='pointer';
+  c.addEventListener('mousemove',(ev)=>{
+    tip.style.display='block';tip.style.left=(ev.clientX+16)+'px';tip.style.top=(ev.clientY+16)+'px';
+    const sc=(activeScores&&activeScores.has(i))?('<div style="color:#34d399;font-size:11px;margin-bottom:3px;">similarity '+activeScores.get(i).toFixed(3)+'</div>'):'';
+    tip.innerHTML='<div class="tp">'+n.topic+'</div>'+sc+n.title.replace(/</g,'&lt;')+(n.journal?'<div class="tj">'+n.journal.replace(/</g,'&lt;')+'</div>':'');
+  });
+  c.addEventListener('mouseleave',()=>{tip.style.display='none';});
+  gNodes.appendChild(c);
+  circles.push(c);
 });
-geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-geometry.setAttribute('color', new THREE.BufferAttribute(colorArr, 3));
-const colorAttr = geometry.getAttribute('color');
 
-const material = new THREE.PointsMaterial({ size: 2.0, vertexColors: true, sizeAttenuation: true });
-const cloud = new THREE.Points(geometry, material);
-scene.add(cloud);
+// pan/zoom via viewBox
+let vb={x:0,y:0,w:VW,h:VH};
+function applyVB(){svg.setAttribute('viewBox',vb.x+' '+vb.y+' '+vb.w+' '+vb.h);}
+svg.addEventListener('wheel',(e)=>{
+  e.preventDefault();
+  const r=svg.getBoundingClientRect();
+  const mx=vb.x+((e.clientX-r.left)/r.width)*vb.w;
+  const my=vb.y+((e.clientY-r.top)/r.height)*vb.h;
+  const f=e.deltaY<0?0.87:1.15;
+  const nw=Math.max(120,Math.min(VW*3,vb.w*f)), nh=nw*(VH/VW);
+  vb.x=mx-((e.clientX-r.left)/r.width)*nw; vb.y=my-((e.clientY-r.top)/r.height)*nh; vb.w=nw; vb.h=nh;
+  applyVB();
+},{passive:false});
+let drag=null;
+svg.addEventListener('mousedown',(e)=>{drag={sx:e.clientX,sy:e.clientY,ox:vb.x,oy:vb.y};svg.classList.add('drag');});
+window.addEventListener('mousemove',(e)=>{
+  if(!drag)return;const r=svg.getBoundingClientRect();
+  vb.x=drag.ox-((e.clientX-drag.sx)/r.width)*vb.w; vb.y=drag.oy-((e.clientY-drag.sy)/r.height)*vb.h; applyVB();
+});
+window.addEventListener('mouseup',()=>{drag=null;svg.classList.remove('drag');});
 
-camera.position.set(30, 25, 45);
-controls.target.set(0, 0, 0);
-controls.update();
-
-const raycaster = new THREE.Raycaster();
-raycaster.params.Points.threshold = 1.4;
-const mouse = new THREE.Vector2();
-
-const baseColors = points.map((p) => new THREE.Color(colors[p.topic] || '#94a3b8'));
-const dimColor = new THREE.Color(0x23252f);
-let activeScores = null;
-
-function cosineSim(a, b) {
-  let dot = 0, na = 0, nb = 0;
-  for (let i = 0; i < a.length; i++) { dot += a[i] * b[i]; na += a[i] * a[i]; nb += b[i] * b[i]; }
-  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
-}
-
-function resetSearch() {
-  activeScores = null;
-  for (let i = 0; i < points.length; i++) colorAttr.setXYZ(i, baseColors[i].r, baseColors[i].g, baseColors[i].b);
-  colorAttr.needsUpdate = true;
-  resultsEl.className = '';
-  resultsEl.innerHTML = '';
-}
-
-async function runSearch(q) {
-  resultsEl.className = 'show';
-  resultsEl.innerHTML = '<div class="r-title">searching…</div>';
-  try {
-    const res = await fetch(LOCAL_WORKER_URL + '/query-embed', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ text: q, model: EMBED_MODEL }),
+// search — embed query via shared worker, cosine vs stored vectors, highlight
+let activeScores=null;
+function cos(a,b){let d=0,na=0,nb=0;for(let i=0;i<a.length;i++){d+=a[i]*b[i];na+=a[i]*a[i];nb+=b[i]*b[i];}return d/(Math.sqrt(na)*Math.sqrt(nb)||1);}
+const dim='#dfe3e8';
+function reset(){activeScores=null;NODES.forEach((n,i)=>{circles[i].setAttribute('fill',COLORS[n.topic]||'#94a3b8');circles[i].setAttribute('r','9');});resultsEl.className='';resultsEl.innerHTML='';}
+async function runSearch(q){
+  resultsEl.className='show';resultsEl.innerHTML='<div class="rt">searching…</div>';
+  try{
+    const res=await fetch(WORKER+'/query-embed',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({text:q,model:MODEL})});
+    if(!res.ok)throw new Error('embed worker HTTP '+res.status);
+    const j=await res.json();const qv=j.data&&j.data[0];if(!qv)throw new Error('no vector');
+    const scored=VECTORS.map((v,i)=>({i,s:cos(qv,v)})).sort((a,b)=>b.s-a.s);
+    activeScores=new Map(scored.map(o=>[o.i,o.s]));
+    const top=scored.slice(0,10);const topSet=new Set(top.map(o=>o.i));
+    NODES.forEach((n,i)=>{
+      if(topSet.has(i)){circles[i].setAttribute('fill',COLORS[n.topic]||'#94a3b8');circles[i].setAttribute('r','13');}
+      else{circles[i].setAttribute('fill',dim);circles[i].setAttribute('r','7');}
     });
-    if (!res.ok) throw new Error('embed worker HTTP ' + res.status);
-    const json = await res.json();
-    const qVec = json.data && json.data[0];
-    if (!qVec) throw new Error('embed worker returned no vector');
-
-    const scored = vectors.map((v, i) => ({ index: i, score: cosineSim(qVec, v) }));
-    scored.sort((a, b) => b.score - a.score);
-    activeScores = new Map(scored.map((s) => [s.index, s.score]));
-
-    const top = scored.slice(0, 10);
-    const topSet = new Set(top.map((t) => t.index));
-    for (let i = 0; i < points.length; i++) {
-      if (topSet.has(i)) {
-        const c = baseColors[i].clone().lerp(new THREE.Color(0xffffff), Math.min(activeScores.get(i), 1) * 0.55);
-        colorAttr.setXYZ(i, c.r, c.g, c.b);
-      } else {
-        colorAttr.setXYZ(i, dimColor.r, dimColor.g, dimColor.b);
-      }
-    }
-    colorAttr.needsUpdate = true;
-
-    resultsEl.innerHTML = '<div class="r-title">top ' + top.length + ' papers for "' + q + '"</div>' +
-      top.map((t) => {
-        const p = points[t.index];
-        return '<div class="r-item" data-idx="' + t.index + '"><span class="r-score">' + t.score.toFixed(3) +
-          '</span><span class="r-path">' + p.title + '</span></div>';
-      }).join('');
-  } catch (err) {
-    resultsEl.className = 'show';
-    resultsEl.innerHTML = '<div class="r-err">' + (err && err.message ? err.message : String(err)) + '</div>';
-  }
+    resultsEl.innerHTML='<div class="rt">top '+top.length+' for "'+q+'"</div>'+top.map(o=>'<div class="ri" data-i="'+o.i+'"><span class="rs">'+o.s.toFixed(3)+'</span><span>'+NODES[o.i].label+'</span></div>').join('');
+  }catch(err){resultsEl.innerHTML='<div class="rt" style="color:#d33">'+(err&&err.message?err.message:err)+'</div>';}
 }
-
-searchInput.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && searchInput.value.trim()) runSearch(searchInput.value.trim());
-});
-searchClear.addEventListener('click', () => { searchInput.value = ''; resetSearch(); });
-resultsEl.addEventListener('click', (e) => {
-  const item = e.target.closest('.r-item');
-  if (!item) return;
-  const i = Number(item.dataset.idx);
-  const target = new THREE.Vector3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]);
-  controls.target.copy(target);
-  camera.position.copy(target).add(new THREE.Vector3(8, 6, 10));
-  controls.update();
-});
-
-renderer.domElement.addEventListener('mousemove', (e) => {
-  mouse.x = (e.clientX / innerWidth) * 2 - 1;
-  mouse.y = -(e.clientY / innerHeight) * 2 + 1;
-  raycaster.setFromCamera(mouse, camera);
-  const hits = raycaster.intersectObject(cloud);
-  if (hits.length) {
-    const i = hits[0].index;
-    const p = points[i];
-    tooltip.style.display = 'block';
-    tooltip.style.left = (e.clientX + 16) + 'px';
-    tooltip.style.top = (e.clientY + 16) + 'px';
-    const scoreLine = activeScores && activeScores.has(i)
-      ? '<div style="color:#34d399;font-size:11px;margin-bottom:4px;">similarity ' + activeScores.get(i).toFixed(3) + '</div>'
-      : '';
-    tooltip.innerHTML = '<div class="topic">' + p.topic + '</div>' + scoreLine +
-      p.title.replace(/</g,'&lt;') + (p.journal ? '<div class="journal">' + p.journal.replace(/</g,'&lt;') + '</div>' : '');
-  } else {
-    tooltip.style.display = 'none';
-  }
-});
-
-window.addEventListener('resize', () => {
-  camera.aspect = innerWidth / innerHeight;
-  camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight);
-});
-
-function animate() {
-  requestAnimationFrame(animate);
-  controls.update();
-  renderer.render(scene, camera);
-}
-animate();
+document.getElementById('q').addEventListener('keydown',(e)=>{if(e.key==='Enter'&&e.target.value.trim())runSearch(e.target.value.trim());});
+document.getElementById('clr').addEventListener('click',()=>{document.getElementById('q').value='';reset();});
+resultsEl.addEventListener('click',(e)=>{const it=e.target.closest('.ri');if(!it)return;const i=+it.dataset.i;const n=NODES[i];vb.w=520;vb.h=vb.w*(VH/VW);vb.x=n.x-vb.w/2;vb.y=n.y-vb.h/2;applyVB();});
 </script>
 </body></html>`;
 
@@ -557,7 +618,10 @@ animate();
 
   return {
     ok: true,
-    output: `✦ citation constellation — http://localhost:${port}\n${points.length} papers across ${topics.length} topics, interactive 3D PCA + semantic search\nCtrl+C to stop`,
+    output:
+      `✦ citation constellation (2D) — http://localhost:${port}\n` +
+      `${nodes.length} papers · ${topics.length} topics · ${edges.length} edges (sim > ${threshold})\n` +
+      `drag to pan · scroll to zoom · hover a star · search to highlight\nCtrl+C to stop`,
   };
 }
 
@@ -605,15 +669,21 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
 
   const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
   const nodes = rows.map((r: Record<string, unknown>) => ({ title: String(r.title), topic: String(r.topic), label: shortLabel(String(r.title)) }));
-  const coords = pcaND(vectors, 2);
+  const coords = tsne(vectors);
 
-  // canvas
+  // canvas — scale on the 2nd–98th percentile so a stray outlier can't
+  // squash the whole cloud into a corner.
   const W = 2000, H = 1300, M = 90;
+  const pct = (arr: number[], p: number) => {
+    const s = [...arr].sort((a, b) => a - b);
+    return s[Math.max(0, Math.min(s.length - 1, Math.floor((p / 100) * (s.length - 1))))];
+  };
   const xs = coords.map((c) => c[0] ?? 0), ys = coords.map((c) => c[1] ?? 0);
-  const [minX, maxX] = [Math.min(...xs), Math.max(...xs)];
-  const [minY, maxY] = [Math.min(...ys), Math.max(...ys)];
-  const sx = (x: number) => M + ((x - minX) / (maxX - minX || 1)) * (W - 2 * M);
-  const sy = (y: number) => H - M - ((y - minY) / (maxY - minY || 1)) * (H - 2 * M); // flip
+  const minX = pct(xs, 2), maxX = pct(xs, 98);
+  const minY = pct(ys, 2), maxY = pct(ys, 98);
+  const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v));
+  const sx = (x: number) => M + ((clamp(x, minX, maxX) - minX) / (maxX - minX || 1)) * (W - 2 * M);
+  const sy = (y: number) => H - M - ((clamp(y, minY, maxY) - minY) / (maxY - minY || 1)) * (H - 2 * M); // flip
   const px = coords.map((c) => sx(c[0] ?? 0));
   const py = coords.map((c) => sy(c[1] ?? 0));
 
@@ -647,26 +717,27 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
       const ly = above ? py[i] - 14 : py[i] + 22;
       return (
         `<circle cx="${px[i].toFixed(1)}" cy="${py[i].toFixed(1)}" r="9" fill="${colorFor(n.topic)}" stroke="#ffffff" stroke-width="1.5"/>` +
-        `<text x="${px[i].toFixed(1)}" y="${ly.toFixed(1)}" font-size="15" text-anchor="middle" fill="#1a1a2e" paint-order="stroke" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round">${svgEscape(n.label)}</text>`
+        `<text x="${px[i].toFixed(1)}" y="${ly.toFixed(1)}" font-family="${FONT_SANS}" font-size="15" text-anchor="middle" fill="#26262e" paint-order="stroke" stroke="#ffffff" stroke-width="3.5" stroke-linejoin="round">${svgEscape(n.label)}</text>`
       );
     })
     .join("");
 
   const legendSvg =
     `<rect x="34" y="34" width="360" height="${44 + topics.length * 30}" rx="10" fill="#ffffff" stroke="#d7dbe0" stroke-width="1.5"/>` +
-    `<text x="54" y="66" font-size="21" font-weight="700" fill="#1a1a2e">Research Clusters</text>` +
+    `<text x="54" y="66" font-family="${FONT_SERIF}" font-size="22" font-weight="700" fill="#1a1a2e">Research Clusters</text>` +
     topics
       .map((t, i) => {
         const cy = 92 + i * 30;
         const count = nodes.filter((n) => n.topic === t).length;
-        return `<circle cx="64" cy="${cy - 5}" r="8" fill="${colorFor(t)}"/><text x="82" y="${cy}" font-size="17" fill="#33373d">${svgEscape(t)} (${count})</text>`;
+        return `<circle cx="64" cy="${cy - 5}" r="8" fill="${colorFor(t)}"/><text x="82" y="${cy}" font-family="${FONT_SANS}" font-size="17" fill="#33373d">${svgEscape(t)} (${count})</text>`;
       })
       .join("");
 
   const svg =
     `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
     `<rect width="${W}" height="${H}" fill="#ffffff"/>` +
-    `<text x="${W / 2}" y="52" font-size="30" font-weight="800" text-anchor="middle" fill="#141428">Citation Constellation — Similarity &gt; ${threshold} (bge-m3, ${nodes.length} papers)</text>` +
+    `<text x="${W / 2}" y="50" font-family="${FONT_SERIF}" font-size="34" font-weight="700" text-anchor="middle" fill="#141428">Citation Constellation</text>` +
+    `<text x="${W / 2}" y="76" font-family="${FONT_SANS}" font-size="16" text-anchor="middle" fill="#6b7280">bge-m3 · t-SNE · ${nodes.length} papers · ${edges.length} edges (cosine &gt; ${threshold})</text>` +
     edgeSvg + legendSvg + nodeSvg +
     `</svg>`;
 
