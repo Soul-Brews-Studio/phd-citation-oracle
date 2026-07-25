@@ -10,8 +10,9 @@ maw citation bib out.bib            # กำหนดปลายทางเอ
 maw citation bib --by-topic         # เรียงตาม 6 taproot แทนตัวอักษร
 ```
 
-อ่านการ์ดใน `ψ/papers/` ประกอบเป็น `@article{}` เขียนทับทุก
-ครั้ง — การ์ดคือความจริง `.bib` generate ซ้ำได้
+อ่านการ์ดใน `ψ/papers/` ดึง frontmatter 9 field ประกอบเป็น
+`@article{}` เขียนทับทุกครั้ง — การ์ดคือความจริง `.bib`
+generate ซ้ำได้
 
 `--by-topic` คั่นกลุ่มด้วย `% ── <topic> ──` เช็คจำนวน paper
 ต่อ topic

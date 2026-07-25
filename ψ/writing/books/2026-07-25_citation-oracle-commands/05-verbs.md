@@ -63,20 +63,20 @@ Next: maw citation index   (cards are picked up automatically)
 `cards` แตะแค่ 56 ใบจาก JSONL อีก 6 ปล่อยเฉย `INDEX.md` นับ
 ไดเรกทอรีจริง ได้ 62 เสมอ
 
-`Next:` พิมพ์ `maw citation index` คงที่ในโค้ด แม้เรียกผ่าน
+`Next:` พิมพ์ `maw citation index` คงที่ แม้เรียกผ่าน
 `./bin/citation` — แนะนำเฉยๆ ไม่ใช่บั๊ก
 
 รันซ้ำได้ — `git diff` ไม่เปลี่ยนแม้แต่ไบต์เดียว ไม่มี timestamp
 ฝังใน frontmatter
 
-flag เดียว — ระบุ path `.jsonl` อื่นแทน default:
-`./bin/citation cards path/to/other.jsonl` (แทบไม่ใช้ เพราะ
-corpus มีไฟล์เดียว)
+flag เดียว — ระบุ path `.jsonl` อื่น:
+`./bin/citation cards path/to/other.jsonl` (แทบไม่ใช้ — corpus
+มีไฟล์เดียว)
 
 ## 5.3 `doi` — ถาม Crossref (dry run เป็น default)
 
 **default คือ dry run** ไม่เขียนจนสั่ง `--write` — Crossref เดา
-ผิดได้ ดูก่อนเชื่อดีกว่าเขียนทับแล้วแก้
+ผิดได้ ดูก่อนเชื่อดีกว่า
 
 ```bash
 ./bin/citation doi jarernwong2021
@@ -123,9 +123,9 @@ Use in LaTeX:  \bibliography{artifacts/citation}
   then \cite{adong2025}
 ```
 
-"citable" ≠ มี DOI — ต้องมีผู้แต่ง/ชื่อเรื่อง/วารสาร/ปีครบ ขาด
-ผู้แต่ง**คอมเมนต์ไว้ ไม่ตัดทิ้ง** — `withheld` บอกว่าขาดอะไร แก้
-ด้วย `doi --write` แล้วรัน `bib` ใหม่
+"citable" ≠ มี DOI — ต้องผู้แต่ง/ชื่อเรื่อง/วารสาร/ปีครบ ขาด
+ผู้แต่ง**คอมเมนต์ไว้ ไม่ตัดทิ้ง** `withheld` บอกว่าขาดอะไร แก้ด้วย
+`doi --write` แล้วรัน `bib` ใหม่
 
 flag เดียว — `--by-topic` จัดกลุ่มตาม 6 หัวข้อแทน citekey ช่วย
 เขียน related work ทีละหัวข้อ
@@ -136,7 +136,7 @@ flag เดียว — `--by-topic` จัดกลุ่มตาม 6 หั
 ## 5.5 `index` / `search` — `--vault` รวม paper กับ note
 
 `index` แปลงข้อความการ์ดเป็นเวกเตอร์ 1024 มิติผ่าน ollama ทำซ้ำ
-เมื่อแก้ title/summary/relevance (`doi:` ไม่ต้อง — ไม่ถูก embed)
+เมื่อแก้ title/summary/relevance
 
 ```bash
 ./bin/citation index --vault
@@ -162,16 +162,15 @@ Wrote .../.maw/citation-data/store — 75 × 1024-dim
   together)
 ```
 
-path ของ store แล้วแต่ shell session — มี `MAW_HOME` ได้
-`.maw/citation-data/store` ไม่มีได้ `<repo>/.citation/store`
-แทน — เชื่อ `status` เสมอว่า store อยู่ไหน
+path ของ store แล้วแต่ session — มี `MAW_HOME` ได้
+`.maw/citation-data/store` ไม่มีได้ `<repo>/.citation/store` —
+เชื่อ `status` เสมอว่าอยู่ไหน
 
-`--vault` = flag ใช้บ่อยสุด — ไม่ใส่ได้แค่ 62 paper ใส่แล้ว
-ครอบคลุมโน้ตวอลต์ด้วย (retro, learning, research draft)
+`--vault` = flag บ่อยสุด — ไม่ใส่ได้แค่ 62 paper ใส่แล้วครอบคลุม
+โน้ตวอลต์ด้วย
 
-store ไม่ใช่ database — ไฟล์ธรรมดา 3 ไฟล์ (`vectors.f32`
-`meta.jsonl` `manifest.json`) เปลี่ยน model ต้อง `index` ใหม่
-ทั้งชุดเสมอ เวกเตอร์คนละ model เทียบกันไม่ได้
+store ไม่ใช่ database — ไฟล์ธรรมดา 3 ไฟล์ เปลี่ยน model ต้อง
+`index` ใหม่ทั้งชุดเสมอ เวกเตอร์คนละ model เทียบกันไม่ได้
 
 ```bash
 ./bin/citation search "low-cost sensor calibration PM2.5" -k 3
@@ -216,16 +215,16 @@ pipe สคริปต์อื่น
 ```
 
 ไม่มี database ไม่มี ANN index — brute-force cosine ล้วนๆ 75
-แถวใช้เวลาราว 0.2 วินาที ข้อมูลแค่หลักสิบ ยังไม่ต้องซับซ้อนกว่านี้
+แถว 0.2 วินาที ยังไม่ต้องซับซ้อนกว่านี้
 
 ## 5.6 `serve` / `graph` — ดูกลุ่มดาว
 
-ทั้งคู่คำนวณ cosine similarity ระหว่างทุกคู่ paper วาดเป็น
-เส้นเชื่อม — คือ "ใกล้เคียงเชิงความหมาย" ไม่ใช่ "ใครอ้างอิงใคร"
+ทั้งคู่คำนวณ cosine similarity ทุกคู่ paper วาดเป็นเส้น — คือ
+"ใกล้เคียงเชิงความหมาย" ไม่ใช่ "ใครอ้างอิงใคร"
 
-`serve` (หรือ `visualize`) เปิด server localhost แบบ interactive
-ลาก ซูม hover ดู default port 5556 ชนพอร์ตเดิม — ขยับเอง
-อัตโนมัติ ไม่ล้มด้วย `EADDRINUSE`
+`serve` (หรือ `visualize`) เปิด server localhost interactive
+ลาก ซูม hover default port 5556 ชนพอร์ตเดิม — ขยับเองอัตโนมัติ
+ไม่ล้มด้วย `EADDRINUSE`
 
 ```bash
 ./bin/citation serve --port 5570
@@ -248,7 +247,7 @@ drag to pan · scroll to zoom · click a star for detail
 ```
 
 "isolated 15" ไม่ใช่บั๊ก — 15 ใบไม่มีเส้นเชื่อมที่ threshold 0.68
-แค่ห่างจากใบอื่น ลด threshold ถึงเห็นเส้นบางๆ
+ลด threshold ถึงเห็นเส้นบางๆ
 
 `graph` render ผลเดียวกันเป็นไฟล์นิ่ง — SVG/PNG แนบเอกสารได้ตรง
 ไม่ต้องมี server ค้าง
@@ -265,9 +264,8 @@ dense — raise threshold for a cleaner graph:
 maw citation graph --threshold 0.60
 ```
 
-threshold default ของ `graph` (0.5) ต่ำกว่า `serve` (0.68) โดย
-ตั้งใจ — ได้ 1336 เส้นทันที เครื่องมือเตือน "dense" พร้อมบอกเลข
-ที่ควรลอง
+threshold default ของ `graph` (0.5) ต่ำกว่า `serve` (0.68) — ได้
+1336 เส้นทันที เตือน "dense" พร้อมบอกเลขที่ควรลอง
 
 | flag | ใช้กับ | ทำอะไร |
 |---|---|---|
@@ -322,5 +320,4 @@ ollama pull bge-m3
 ```
 
 9 ขั้นตอน 8 คำสั่ง (`doi` ปรากฏสองครั้ง) จากศูนย์ถึงมี `.bib`
-พร้อมส่งวิทยานิพนธ์ กับแผนที่ดาวให้มอง ใช้เวลาไม่ถึง 5 นาทีถ้ามี
-ollama รันอยู่แล้ว
+พร้อมแผนที่ดาว ใช้เวลาไม่ถึง 5 นาทีถ้ามี ollama รันอยู่แล้ว

@@ -7,6 +7,7 @@ troubleshoot
 ## 7.1 ทำไม local เป็น default
 
 corpus ยังไม่ตีพิมพ์ — `thesis_relevance` คือ argument ที่ยังไม่เผยแพร่
+บาง paper ก็ยังเป็น preprint ส่งออกนอกเครื่องเท่ากับส่งข้อมูลคนอื่นไปด้วย
 default จึงต้อง **ไม่ออกเน็ต** เสมอ
 
 | ลำดับ | backend | ต้องมีอะไร | ออกเน็ตไหม |
@@ -18,10 +19,7 @@ default จึงต้อง **ไม่ออกเน็ต** เสมอ
 พอ ollama พร้อม ระบบเลือกเองทันที ไม่ต้อง token/account/ต่อเน็ต cloud เป็น
 ตัวสำรอง เปิดใช้เมื่อไม่มี GPU หรือ ollama ล่ม
 
-`thesis_relevance` คือการตีความว่า paper ค้ำ claim ไหน — บาง paper ยังเป็น
-preprint ส่งออกนอกเครื่องเท่ากับส่งข้อมูลคนอื่นไปด้วย
-
-ระบบไล่บนลงล่าง เจอ ollama ที่พร้อมก็หยุด บังคับ backend ตรงๆ ได้เช่นกัน:
+บังคับ backend ตรงๆ ได้:
 
 ```bash
 CITATION_EMBED=ollama   ./bin/citation index --vault
@@ -31,7 +29,7 @@ CITATION_EMBED=cf-rest  ./bin/citation index --vault
 
 ## 7.2 pull model + serve
 
-ดึง model ครั้งเดียว อยู่บนดิสก์ตลอด ไม่ต้องดึงซ้ำ:
+ดึง model ครั้งเดียว อยู่บนดิสก์ตลอด:
 
 ```bash
 ollama pull bge-m3
@@ -47,16 +45,12 @@ ollama serve
 # ต้องสั่งเองเมื่อ install แบบ manual หรือรันบน CI
 ```
 
-bge-m3 = ตัวเดียวที่ citation ใช้ (multilingual, 1024 มิติ) ไทย/อังกฤษอยู่
-vector space เดียวกัน embed ต่อ paper คือ title+summary+thesis_relevance
-เท่านั้น ไม่ใช่ทั้งการ์ด
-
-ฟิลด์อย่าง `doi` `volume` `pages` ไม่ถูก embed — เติม `doi` ทีหลังได้
-ไม่ต้อง index ใหม่ทั้งชุด
+bge-m3 = ตัวเดียวที่ citation ใช้ (multilingual, 1024 มิติ) — embed ต่อ
+paper คือ title+summary+thesis_relevance เท่านั้น ฟิลด์ `doi` `volume`
+`pages` ไม่ถูก embed เติมทีหลังได้โดยไม่ต้อง index ใหม่
 
 `--vault` embed vault note จาก `ψ/memory/{learnings,retrospectives,resonance}`
-และ `ψ/writing/research` ด้วย ติด tag `kind: note` — search เจอทั้งสองแบบ
-พร้อมกัน
+และ `ψ/writing/research` ด้วย ติด tag `kind: note` — search เจอทั้งคู่
 
 ## 7.3 รันจริง — 75 รายการ 8.4 วินาที
 
@@ -73,8 +67,7 @@ vector space เดียวกัน embed ต่อ paper คือ title+summ
 | ขนาด `vectors.f32` | 300 KB |
 | bge-m3 ใน VRAM | 634 MB · ctx 8192 · 100% GPU |
 
-เงื่อนไข: model ต้อง warm ใน GPU อยู่แล้ว (ครั้งแรกหลังเครื่องว่างนาน
-เสียเวลาโหลด VRAM เพิ่ม) เฉลี่ยวินาทีละ 9 รายการ — เร็วพอสั่งซ้ำบ่อยๆ ได้
+เงื่อนไข: model ต้อง warm ใน GPU อยู่แล้ว เฉลี่ยวินาทีละ 9 รายการ
 
 search คือ embed คำถามแล้วเทียบ cosine กับ 75 แถวแบบ brute-force เขียนล้วน
 ด้วย TypeScript — เล็กเกินกว่าต้องใช้โครงสร้างซับซ้อน:
@@ -88,11 +81,11 @@ search คือ embed คำถามแล้วเทียบ cosine กั�
 ```
 
 📄 คือ paper 📝 คือ note ตัวเลขในวงเล็บคือ cosine similarity ยิ่งใกล้ 1
-ยิ่งใกล้เคียงคำถาม — ทั้งสองแหล่งอยู่ vector space เดียวกัน
+ยิ่งใกล้เคียงคำถาม
 
 store บนดิสก์ = 3 ไฟล์ธรรมดา ไม่ใช่ database: `vectors.f32` (75 × 1024
 float32) `meta.jsonl` (metadata) `manifest.json` (ชื่อ model) — สลับ model
-ต้อง index ใหม่ทั้งชุด ลบทิ้งได้เสมอ เป็น derived data ล้วนๆ
+ต้อง index ใหม่ทั้งชุด ลบทิ้งได้เสมอ
 
 ## 7.4 batch 16 — เคสยิงทีเดียวหมดแล้วพัง
 
@@ -103,19 +96,16 @@ CF_EMBED_BATCH=16   # ค่า default
 ```
 
 ตอน corpus มีแค่ 56 paper ยิงทีเดียวยังผ่าน พอรวม note ทะลุ 65 รายการ
-เริ่มพัง — worker ตอบ error 500 ตรงๆ ไม่ว่าจะเพราะ payload limit หรือ
-timeout ฝั่ง worker ผลที่เห็นคือ 500 เหมือนกัน
-
-ทางแก้: หั่นชุดละ 16 รอผลก่อนส่งชุดถัดไป (75 รายการ = 5 รอบ) เป็น
-default อยู่แล้ว RAM น้อยหรือ backend limit ต่ำกว่า 16 ลด batch ได้ตรงๆ:
+เริ่มพัง — worker ตอบ error 500 ไม่ว่าจะเพราะ payload limit หรือ timeout
+ฝั่ง worker ทางแก้คือหั่นชุดละ 16 รอผลก่อนส่งชุดถัดไป (75 รายการ = 5
+รอบ) RAM น้อยหรือ backend limit ต่ำกว่า 16 ลด batch ได้ตรงๆ:
 
 ```bash
 CF_EMBED_BATCH=8  ./bin/citation index --vault
 ```
 
 batch เล็กลง = รอบส่งเยอะขึ้น ช้านิดหน่อย แต่ request เบาลง ปรับได้ทันที
-แค่ตั้ง env var บทเรียน: อย่ายิงทีเดียวหมด — 65 รายการก็พังได้ถ้าไม่หั่น
-batch
+แค่ตั้ง env var บทเรียน: อย่ายิงทีเดียวหมด
 
 ## 7.5 troubleshooting
 
@@ -142,13 +132,13 @@ curl -s http://localhost:11434/api/ps
 # size == size_vram → resident เต็มก้อนบน GPU (100%, ไม่มี CPU fallback)
 ```
 
-ollama unload model เองหลังไม่ใช้งาน ~5 นาที (เช็คจาก `expires_at` ใน
-`/api/ps`) — index รอบแรกของวันช้ากว่านิดหน่อยเพราะ warm กลับ VRAM ไม่ใช่
-อาการพัง ยืนยันด้วย `size` vs `size_vram` ไม่ใช่เดาจากความรู้สึก
+ollama unload model เองหลังไม่ใช้งาน ~5 นาที (เช็คจาก `expires_at`) — index
+รอบแรกของวันช้ากว่านิดหน่อยเพราะ warm กลับ VRAM ไม่ใช่อาการพัง ยืนยันด้วย
+`size` vs `size_vram`
 
 ถ้าเช็คครบแล้วยัง `no embedding backend reachable` บังคับด้วย
-`CITATION_EMBED=ollama` จะเห็น error ชัดกว่าเดิม เทียบ backend ที่ 2 ตอน
-ดีบัก เปิดคู่กันได้ด้วย wrangler ที่ล็อกอินไว้แล้ว:
+`CITATION_EMBED=ollama` จะเห็น error ชัดกว่าเดิม เทียบ backend ที่ 2 เปิด
+คู่กันได้ด้วย wrangler ที่ล็อกอินไว้แล้ว:
 
 ```bash
 cd ~/.maw/plugins/cf-embed/worker
@@ -165,8 +155,7 @@ worker คู่ เท่ากับส่งข้อความออกเ
 ใบด้วย `citation doi <citekey>` ต่อเน็ตผ่าน tethering ควอต้าจำกัดก็ยังทำได้
 
 ตัวเลขทั้งบทนี้วัดบนเครื่องที่มี GPU พร้อมอยู่แล้ว — m5 เป็น Apple
-Silicon unified memory ให้ CPU กับ GPU ใช้ RAM ก้อนเดียวกัน ไม่ต้องคัดลอก
-ข้ามไปมาแบบ discrete GPU
+Silicon unified memory (CPU/GPU ใช้ RAM ก้อนเดียวกัน)
 
 index บนเครื่องที่ไม่มี GPU เลย ใช้เวลากี่วินาที **ยังไม่ได้วัด** สักครั้ง
 ทั้งบนเครื่องที่ปิด GPU ทดสอบ และเครื่อง Intel/AMD ทั่วไป

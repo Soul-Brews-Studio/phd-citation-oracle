@@ -1,6 +1,6 @@
 # บทที่ 4: โครงสร้าง — ของอยู่ไหน อะไรคือของจริง
 
-`.bib` ผิด ค้นหาได้คำตอบมั่ว แก้ที่ไหน — คำตอบเดียว: แก้ที่การ์ดใน `ψ/papers/` เสมอ JSONL/store เป็นผลลัพธ์ derive ลบสร้างใหม่ได้ตลอด
+`.bib` ผิด ค้นหามั่ว แก้ที่ไหน — คำตอบเดียว: แก้การ์ดใน `ψ/papers/` เสมอ JSONL/store derive ได้ ลบสร้างใหม่ตลอด
 
 ## 4.1 แผนที่ repo
 
@@ -30,7 +30,7 @@ paper-card/            research-ingest/
 | `artifacts/` | ผลผลิต — JSONL นำเข้า, `.bib`, กราฟ PNG/SVG/HTML |
 | `bin/citation` | ทางเข้าแบบไม่ต้องมี maw |
 
-`.claude/skills/` คนละชั้น — ใช้**หา**เนื้อหาใหม่ป้อนคอร์ปัส:
+`.claude/skills/` คนละชั้น — ใช้หาเนื้อหาใหม่ป้อนคอร์ปัส:
 
 | skill | ทำอะไร |
 |---|---|
@@ -48,7 +48,7 @@ handler เดียวกัน ไม่มี dispatch สองชุดใ�
 maw citation status        # เหมือนกันทุกอย่าง สำหรับคนมี maw
 ```
 
-ต่างกันแค่ตอน**หา repo root**:
+ต่างกันแค่หา repo root:
 
 | ลำดับ | แหล่ง | เงื่อนไข |
 |---|---|---|
@@ -59,9 +59,9 @@ maw citation status        # เหมือนกันทุกอย่าง
 | 5 | `git rev-parse --show-toplevel` | อยู่ใน repo git |
 | 6 | cwd ตรง ๆ | ทางสุดท้าย |
 
-ข้อ 3 คือเหตุผลที่ `./bin/citation status` รันจาก `/tmp` ยังได้ผล (commit `051014b`) — ดูตำแหน่งสคริปต์ ไม่ใช่ที่เรายืน
+ข้อ 3 คือเหตุผลที่ `./bin/citation status` รันจาก `/tmp` ยังได้ผล (commit `051014b`) — ดูตำแหน่งสคริปต์ ไม่ใช่ที่ยืน
 
-รูตผิด `status` ไม่ error แค่รายงาน "0 paper card" เงียบ ๆ — บรรทัดแรกจึงบอกกฎเสมอ บนเครื่อง m5:
+รูตผิด `status` ไม่ error แค่รายงาน "0 paper card" เงียบ ๆ บนเครื่อง m5:
 
 ```
 repo root: /opt/Code/github.com/Soul-Brews-Studio/
@@ -70,15 +70,15 @@ phd-citation-oracle (walk up from the script)
 
 ## 4.2 ψ/papers/ — การ์ดคือของจริง
 
-62 การ์ด กฎเดียว: **ชื่อไฟล์ = citekey = คีย์ใน `\cite{}`** ไฟล์ `mahajan2025.md` มี `citekey: mahajan2025` วิทยานิพนธ์เขียน `\cite{mahajan2025}` ตรง ๆ ไม่มีชั้นแปลกลาง
+62 การ์ด กฎเดียว: **ชื่อไฟล์ = citekey = คีย์ใน `\cite{}`** `mahajan2025.md` มี `citekey: mahajan2025` วิทยานิพนธ์เขียน `\cite{mahajan2025}` ตรง ไม่มีชั้นแปล
 
 README ของ `ψ/papers/`:
 
-> "ที่นี่คือ source of truth ไม่ใช่ `artifacts/literature_corpus.jsonl` — JSONL เป็นแค่ช่องทาง import ตอนเริ่ม ถ้าจะแก้อะไรให้แก้ card"
+> "ที่นี่คือ source of truth ไม่ใช่ `artifacts/literature_corpus.jsonl` — JSONL เป็นช่องทาง import ตอนเริ่มเท่านั้น แก้อะไรให้แก้ card"
 
-import แล้ว JSONL หมดหน้าที่ แก้ทีหลังไม่มีผลกับการ์ด (เว้น `cards` regenerate — หัวข้อ 4.4)
+import แล้ว JSONL หมดหน้าที่ แก้ทีหลังไม่มีผลกับการ์ด (เว้น `cards` regenerate — 4.4)
 
-62 การ์ดผูกกับ 1 ใน 6 taproot topic (field `topic`, หัวข้อ 4.3):
+62 การ์ดผูกกับ 1 ใน 6 taproot topic (`topic`, 4.3):
 
 | topic | จำนวนการ์ด |
 |---|---:|
@@ -89,9 +89,9 @@ import แล้ว JSONL หมดหน้าที่ แก้ทีหล�
 | `reference-monitoring-bam` | 6 |
 | `multi-source-fusion-qa` | 6 |
 
-รวม 62 พอดี — กราฟ `serve`/`graph` (บทที่ 5) ลงสีได้ 6 กลุ่ม
+รวม 62 พอดี — กราฟบทที่ 5 ลงสีได้ 6 กลุ่ม
 
-ใน `ψ/papers/` มีไฟล์ที่**ไม่ใช่**การ์ดสองไฟล์:
+ใน `ψ/papers/` มีไฟล์ที่ไม่ใช่การ์ดสองไฟล์:
 
 | ไฟล์ | คืออะไร | แก้มือได้ไหม |
 |---|---|---|
@@ -99,11 +99,11 @@ import แล้ว JSONL หมดหน้าที่ แก้ทีหล�
 | `INDEX.md` | สารบัญ generate อัตโนมัติ | **ห้าม** — เดี๋ยวถูกทับ |
 | `README.md` | คู่มือเพิ่ม/แก้การ์ดด้วยมือ | ได้ แต่ไม่ใช่ข้อมูล |
 
-indexer ข้าม `INDEX.md`/`README.md` โดยเจตนา (เคยบั๊ก `README.md` หลุดเข้า index เป็น "uncategorized" — แก้แล้ว)
+indexer ข้าม `INDEX.md`/README โดยตั้งใจ (เคยบั๊ก README หลุดเข้า index เป็น "uncategorized" — แก้แล้ว)
 
 ## 4.3 frontmatter 20 field
 
-ทุกการ์ดขึ้นต้นด้วย YAML frontmatter ครบ 20 field ตัวอย่างจริง `mahajan2025.md`:
+ทุกการ์ดมี YAML frontmatter 20 field ตัวอย่าง `mahajan2025.md`:
 
 ```yaml
 citekey: mahajan2025
@@ -130,18 +130,18 @@ tags: [paper, low-cost-sensor-calibration]
 kind: paper
 ```
 
-ไม่มี field 19-20 — เฉพาะการ์ดที่เคยถูก Crossref แก้ citekey/ผู้เขียน (หัวข้อ 4.6)
+ไม่มี field 19-20 — เฉพาะการ์ดที่ Crossref เคยแก้ citekey/ผู้เขียน (4.6)
 
-ตารางเต็มทั้ง 20 field — บังคับไหม embed เป็น vector ตอน `index` ด้วยไหม:
+ตารางเต็ม 20 field — บังคับไหม ถูก embed เป็น vector ตอน `index` ไหม:
 
 | # | field | คืออะไร | บังคับ | embed? |
 |---|---|---|---|---|
-| 1 | `citekey` | คีย์ citation ตรงชื่อไฟล์ | บังคับ | ไม่ |
+| 1 | `citekey` | คีย์ตรงชื่อไฟล์ | บังคับ | ไม่ |
 | 2 | `id` | เลข section เรียง `INDEX.md` | บังคับ | ไม่ |
-| 3 | `title` | ชื่อ paper เต็ม | บังคับ | ทางอ้อม |
+| 3 | `title` | ชื่อเต็ม | บังคับ | ทางอ้อม |
 | 4 | `short_title` | ชื่อสั้นบนกราฟ | แนะนำ | ใช่ |
-| 5 | `authors` | รายชื่อผู้เขียน | บังคับ | ใช่ |
-| 6 | `year` | ปีตีพิมพ์ | บังคับ | ใช่ |
+| 5 | `authors` | ผู้เขียน | บังคับ | ใช่ |
+| 6 | `year` | ปีพิมพ์ | บังคับ | ใช่ |
 | 7 | `journal` | ชื่อวารสาร | บังคับ | ไม่ |
 | 8 | `quartile` | Q1–Q4 | บังคับ | ไม่ |
 | 9 | `impact_factor` | IF วารสาร | บังคับ | ไม่ |
@@ -149,17 +149,17 @@ kind: paper
 | 11 | `issue` | ฉบับที่ | optional | ไม่ |
 | 12 | `pages` | เลขหน้า | บังคับ | ไม่ |
 | 13 | `doi` | DOI จาก Crossref | optional | ไม่ |
-| 14 | `topic` | 1 ใน 6 topic เดิม | บังคับ | ไม่ |
+| 14 | `topic` | 1 ใน 6 topic | บังคับ | ไม่ |
 | 15 | `status` | `ok` \| `needs-authors` | บังคับ | ไม่ |
-| 16 | `verified` | แหล่งยืนยัน + วันที่ | optional | ไม่ |
-| 17 | `tags` | `[paper, topic]` ใช้ filter | บังคับ | ไม่ |
-| 18 | `kind` | `paper` — ห้ามลบ | บังคับ | ไม่ |
-| 19 | `aka` | citekey เดิมก่อน rename | optional | ไม่ |
-| 20 | `authors_upstream` | ผู้เขียนเดิมก่อนแก้ | optional | ไม่ |
+| 16 | `verified` | แหล่ง+วันที่ | optional | ไม่ |
+| 17 | `tags` | `[paper, topic]` filter | บังคับ | ไม่ |
+| 18 | `kind` | `paper` ห้ามลบ | บังคับ | ไม่ |
+| 19 | `aka` | citekey ก่อน rename | optional | ไม่ |
+| 20 | `authors_upstream` | ผู้เขียนก่อนแก้ | optional | ไม่ |
 
-แถว 3-6 "ทางอ้อม"/"ใช่" เพราะข้อความที่ยิงเข้า embedder ไม่ใช่ frontmatter ดิบ แต่เป็น**label**จาก `authors` ตัวแรก+`year`+`short_title` ต่อด้วย **Key findings**+**Thesis relevance** จาก body ถึง `## Notes`
+แถว 3-6 "ทางอ้อม"/"ใช่" เพราะ embedder ไม่ใช้ frontmatter ดิบ แต่ใช้**label**จาก `authors`+`year`+`short_title` ต่อด้วย **Key findings**+**Thesis relevance** ถึง `## Notes`
 
-journal/quartile/volume/pages/doi **ไม่ถูก embed** — ใช้ตอนออก `.bib`/โชว์ผลเท่านั้น ข้อความจริงที่ยิงเข้า `bge-m3` จากการ์ด `mahajan2025.md`:
+journal/quartile/volume/pages/doi **ไม่ถูก embed** — ใช้ตอนออก `.bib`/โชว์ผลเท่านั้น ข้อความจริงที่ยิงเข้า `bge-m3` (การ์ดเดียวกัน):
 
 ```text
 Mahajan & Helbing (2025) -- Trust-Based Dynamic Calibration
@@ -173,13 +173,13 @@ DustBoy's A-F confidence grading. Nature-family validation
 of the confidence scoring concept.
 ```
 
-`issue` เว้นว่างได้เงียบ ๆ (`jin2022` เว้นเพราะวารสารไม่มีเลขฉบับ) `doi` กรอกครบ **61/62** — เหลือ `jarernwong2021` ใบเดียว อยู่ *Chemical Engineering Transactions* ที่ Crossref ไม่มีข้อมูล (ไม่มั่นใจไม่เดา)
+`issue` เว้นว่างได้ (`jin2022` เพราะวารสารไม่มีเลขฉบับ) `doi` ครบ **61/62** — เหลือ `jarernwong2021` อยู่ *Chemical Engineering Transactions* ที่ Crossref ไม่มีข้อมูล
 
-`topic` ไม่ถูก embed — ใช้ลงสี node บนกราฟ + gate ต้อง index ใหม่ (ต้องเป็น 1 ใน 6 topic) `kind: paper` ไม่มีผลความหมาย แต่ลบแล้ว index แยก paper จาก vault note ไม่ได้
+`topic` ไม่ถูก embed — ลงสี node บนกราฟ + gate index (ต้องเป็น 1 ใน 6 topic) `kind: paper` ไม่มีผลความหมาย แต่ลบแล้ว index แยก paper จาก vault note ไม่ได้
 
 ## 4.4 ## Notes ไม่หาย — อะไรรอดเวลา regenerate
 
-body ของทุกการ์ดมีสามก้อนตายตัว ตามด้วย `## Notes`:
+body ทุกการ์ดมีสามก้อนตายตัว ตาม `## Notes`:
 
 ```markdown
 **Key findings** — เจออะไร ใส่เลขจริงให้ครบ
@@ -191,11 +191,11 @@ body ของทุกการ์ดมีสามก้อนตายตั
 โน้ตของเราเอง
 ```
 
-parser จับสามก้อนด้วย pattern `**label** —` ตรง ๆ เว้นวรรค/สลับ format นิดเดียวจับไม่เจอ ต้องคงรูปแบบเวลาแก้มือ
+parser จับสามก้อนด้วย pattern `**label** —` เว้นวรรค/สลับ format นิดเดียวจับไม่เจอ ต้องคงรูปแบบเวลาแก้มือ
 
-จุดอันตราย — parser **ไม่ error ตอนจับไม่เจอ** คืนสตริงว่างเฉย ๆ พิมพ์ `**Key Finding**` (s หาย) หรือลืม `—` → ส่วนนั้นว่างตอน embed แต่ `index` ผ่านปกติ search หาไม่เจอ — บั๊กเงียบแบบเดียวกับ NUL byte บทที่แล้ว
+จุดอันตราย — parser ไม่ error ตอนจับไม่เจอ คืนสตริงว่าง พิมพ์ `**Key Finding**` (s หาย) หรือลืม `—` → embed ว่าง แต่ `index` ผ่านปกติ search หาไม่เจอ — บั๊กเงียบแบบ NUL byte บทก่อน
 
-`cards` regenerate การ์ดทั้งชุดจาก JSONL ใช้ตอนอัปเดต/import เพิ่ม — ทับงานแก้มือได้ถ้าไม่ระวัง อะไร**รอดเสมอ** กับอะไร**รอดเพิ่ม**เมื่อมี `verified:`:
+`cards` regenerate การ์ดทั้งชุดจาก JSONL ใช้ตอนอัปเดต/import เพิ่ม — ทับงานแก้มือได้ถ้าไม่ระวัง อะไรรอดเสมอ กับรอดเพิ่มเมื่อมี `verified:`:
 
 | รอดเสมอ ไม่ว่าอะไร | รอดเพิ่ม ถ้ามี `verified:` |
 |---|---|
@@ -206,13 +206,13 @@ parser จับสามก้อนด้วย pattern `**label** —` ตร
 | | `issue` |
 | | `pages` |
 
-เหตุผล — JSONL ต้นทางผิดตั้งแต่แรก (หัวข้อ 4.6) ปล่อย `cards` ทับ field พวกนี้ทุกครั้งเท่ากับ**revert งาน verify ทิ้งหมด** — มี `verified:` แปลว่า "ห้ามแตะ field พวกนี้แล้ว"
+เหตุผล — JSONL ต้นทางผิดมาแต่แรก (4.6) ปล่อย `cards` ทับ field เหล่านี้เท่ากับ**revert verify ทิ้งหมด** — มี `verified:` คือ "ห้ามแตะ field นี้แล้ว"
 
-field อื่นนอกสองคอลัมน์นี้ (`id` `short_title` `quartile` `impact_factor` `topic` `status` `tags` `kind` + body สามก้อนแรก) ถูกทับด้วย JSONL ทุกครั้งถ้ายังไม่ verified แก้ถาวรต้องแก้ที่ JSONL เอง หรือเลิกใช้ `cards`
+field อื่นนอกสองคอลัมน์ (`id` `short_title` `quartile` `impact_factor` `topic` `status` `tags` `kind` + body สามก้อนแรก) ถูก JSONL ทับทุกครั้งถ้ายังไม่ verified แก้ถาวรต้องแก้ JSONL เอง หรือเลิกใช้ `cards`
 
 ## 4.5 store — ไฟล์ธรรมดา 3 ไฟล์ ไม่มี database
 
-`index` เอาการ์ดไป embed แล้วเก็บผลที่ store — ไม่ใช้ database ใช้ไฟล์ธรรมดาสามไฟล์:
+`index` เอาการ์ดไป embed เก็บที่ store — ไม่ใช้ database ใช้ไฟล์ธรรมดาสามไฟล์:
 
 | ไฟล์ | เก็บอะไร |
 |---|---|
@@ -220,7 +220,7 @@ field อื่นนอกสองคอลัมน์นี้ (`id` `short_
 | `meta.jsonl` | 1 บรรทัด = 1 แถว (id/kind/citekey/title/topic) |
 | `manifest.json` | `{ model, dim, count, updated }` |
 
-standalone store บนเครื่อง m5 อยู่ที่ `<repo>/.citation/store` — `manifest.json` จริง:
+standalone store บน m5 อยู่ `<repo>/.citation/store` — `manifest.json` จริง:
 
 ```json
 {
@@ -231,19 +231,19 @@ standalone store บนเครื่อง m5 อยู่ที่ `<repo>/.c
 }
 ```
 
-75 แถว = 62 paper + 13 vault note (index ด้วย `--vault`) หนักประมาณ 300 KB — เบากว่าไฟล์รูปหนึ่งใบ
+75 แถว = 62 paper + 13 vault note (`--vault`) หนักราว 300 KB — เบากว่าไฟล์รูปหนึ่งใบ
 
-`manifest.json` จำชื่อ model เพราะ vector จาก model ต่างกัน**เทียบกันไม่ได้** — 1024 มิติจาก `bge-m3` ไม่อยู่พื้นที่เดียวกับ model อื่น สลับ model ต้อง `index` ใหม่ทั้งชุด แปลงทีละแถวไม่ได้
+`manifest.json` จำชื่อ model เพราะ vector ต่าง model **เทียบกันไม่ได้** — 1024 มิติจาก `bge-m3` ไม่อยู่พื้นที่เดียวกับ model อื่น สลับ model ต้อง `index` ใหม่ทั้งชุด
 
-ผ่าน maw ย้ายไปเก็บที่ `$MAW_HOME/citation-data/store` แทน รูปแบบไฟล์เหมือนเดิม ทั้งคู่ gitignore ลบทิ้งได้ตลอด `index --vault` สร้างใหม่ได้เพราะเป็น derived data ล้วน ๆ
+ผ่าน maw ย้ายไปเก็บที่ `$MAW_HOME/citation-data/store` แทน รูปแบบเหมือนเดิม gitignore ลบทิ้งได้ตลอด `index --vault` สร้างใหม่ได้เพราะเป็น derived data
 
-search brute-force cosine ล้วน ๆ ไม่มี ANN index — 75 แถวใช้เวลาประมาณ **0.2 วินาที** รวม embed คำค้น ยังไม่ต้องคิด scale จนกว่า corpus จะโตหลักหมื่นแถว
+search brute-force cosine ไม่มี ANN index — 75 แถวใช้เวลา **0.2 วินาที** รวม embed คำค้น ยังไม่ต้องคิด scale จนกว่า corpus โตหลักหมื่นแถว
 
 ## 4.6 aka: กับ authors_upstream: — ทำไมไม่มีอะไรถูกลบ
 
-รัน `citation doi` ครั้งแรกถาม Crossref หา DOI ให้ครบ เจอว่า corpus ต้นทางผิด **18 จุด ใน 14 การ์ด** บางใบผิดหนักถึงใส่ผู้เขียนคนแรกผิดคนไปเลย
+รัน `citation doi` ครั้งแรกถาม Crossref หา DOI เจอ corpus ต้นทางผิด **18 จุด ใน 14 การ์ด** บางใบผิดถึงใส่ผู้เขียนคนแรกผิดคน
 
-ตัวอย่างจริง — `jin2022.md` เดิมชื่อไฟล์ `li2022.md` ใส่ผู้เขียนเป็น Li, R./Hu, Y./Li, H./Zhang, Y. แต่ Crossref ยืนยันผู้เขียนจริงคือ Jin, C. — rename `li2022` → `jin2022` ของเดิมไม่หายไปไหน การ์ดใบเดียวกันเก็บสองเวอร์ชันไว้:
+ตัวอย่าง — `jin2022.md` เดิมชื่อ `li2022.md` ใส่ผู้เขียน Li, R./Hu, Y./Li, H./Zhang, Y. แต่ Crossref ยืนยันคือ Jin, C. — rename `li2022` → `jin2022` ของเดิมไม่หาย การ์ดเดียวกันเก็บสองเวอร์ชัน:
 
 ```yaml
 citekey: jin2022
@@ -255,22 +255,22 @@ authors_upstream:
   - "Zhang, Y."
 ```
 
-`aka:` เก็บ citekey เดิมก่อน rename `authors_upstream:` เก็บรายชื่อที่ JSONL เคยอ้างผิด — mechanism สองชั้นของ **Nothing is Deleted**:
+`aka:` เก็บ citekey เดิม `authors_upstream:` เก็บชื่อที่ JSONL เคยอ้างผิด — สองชั้นของ **Nothing is Deleted**:
 
-- **ชั้นแรก** กัน**การ์ดผี** — `cards` regenerate อ่าน `aka:` รู้ว่า `li2022` rename เป็น `jin2022` แล้ว ไม่สร้าง `li2022.md` ซ้ำ ไม่มี `aka:` ทุกรอบ regenerate จะได้การ์ดผีใหม่โผล่เรื่อย ๆ
-- **ชั้นสอง** เก็บ**หลักฐานความผิดพลาด** — ไม่ใช่ลบของผิดแล้วเขียนทับเงียบ ๆ `authors_upstream` บอกว่า "เคยเชื่อว่าคือคนนี้" `authors:` บอกว่า "จริง ๆ คือคนนี้" อยู่ไฟล์เดียวกัน
+- **ชั้นแรก** กัน**การ์ดผี** — `cards` regenerate อ่าน `aka:` รู้ `li2022` rename เป็น `jin2022` แล้ว ไม่สร้าง `li2022.md` ซ้ำ ไม่มี `aka:` ทุกรอบจะเจอการ์ดผีใหม่
+- **ชั้นสอง** เก็บ**หลักฐานผิดพลาด** — ไม่ลบของผิดแล้วทับเงียบ ๆ `authors_upstream` บอก "เคยเชื่อคนนี้" `authors:` บอก "จริงคือคนนี้" ไฟล์เดียวกัน
 
-รายการเต็ม 18 จุด แยกประเภท (ผู้เขียนผิดคน 7 · title แต่งขึ้น 1 · เลขหน้าผีจากเลขท้าย DOI 7 · journal ผิด 1 · volume สลับเลขหน้า 2) อยู่ที่ `artifacts/citation-audit.md`
+รายการเต็ม 18 จุด แยกประเภท (ผู้เขียนผิดคน 7 · title แต่งขึ้น 1 · เลขหน้าผีจากท้าย DOI 7 · journal ผิด 1 · volume สลับเลขหน้า 2) ที่ `artifacts/citation-audit.md`
 
-`aka:`/`authors_upstream:` **ไม่คุ้มครองทุกการแก้** — เฉพาะ citekey เปลี่ยนหรือรายชื่อผู้เขียนเปลี่ยน สองตัวอย่างสวนทาง:
+`aka:`/`authors_upstream:` **ไม่คุ้มครองทุกการแก้** — เฉพาะ citekey/ผู้เขียนเปลี่ยน สองตัวอย่างสวนทาง:
 
 | การ์ด | เกิดอะไร | มี `aka:`? | มี `authors_upstream:`? |
 |---|---|---|---|
 | `she2019` | JSONL แต่ง title เอง (DOI ถูก) Crossref แก้ title citekey ไม่เปลี่ยน | ไม่มี | ไม่มี |
 | `yu2023` | เดิมชื่อไฟล์ `npjclimate2023` แก้เป็น `yu2023` ผู้เขียนไม่เคยผิด ผิดแค่เลขหน้า (363 จากท้าย DOI แทนที่ 41) | มี | ไม่มี |
 
-`she2019` ร่องรอย title เดิมอยู่ที่ `citation-audit.md` กับ git history เท่านั้น ไม่อยู่ในไฟล์การ์ด
+`she2019` ร่องรอย title เดิมอยู่ `citation-audit.md`/git history เท่านั้น ไม่อยู่ไฟล์การ์ด
 
-สรุป — `aka:` ตามการเปลี่ยน**ชื่อไฟล์** `authors_upstream:` ตามการเปลี่ยน**เนื้อหา authors** อิสระจากกัน field อื่น (title, pages, journal, volume) ไม่มี field รองรับ ต้องพึ่ง `citation-audit.md` กับ `git log` — "Nothing is Deleted" ไม่ได้แปลว่าฟิลด์เดียวเก็บทุกอย่าง แปลว่า**มีที่เก็บอยู่เสมอ** คนละชั้นตามแต่อะไรเปลี่ยน
+สรุป — `aka:` ตามชื่อไฟล์เปลี่ยน `authors_upstream:` ตามเนื้อหา authors เปลี่ยน อิสระกัน field อื่น (title, pages, journal, volume) ไม่มี field รองรับ ต้องพึ่ง `citation-audit.md`/`git log` — "Nothing is Deleted" ไม่ใช่ field เดียวเก็บทุกอย่าง แต่**มีที่เก็บอยู่เสมอ** คนละชั้นตามอะไรเปลี่ยน
 
-บทที่ 5 เรียงคำสั่งทั้ง 8 ตัวตามลำดับใช้จริง เริ่มจาก `status` — โครงสร้างบทนี้คือสิ่งที่ `status` รายงานให้ฟังทุกครั้งที่เรียก
+บทที่ 5 เรียงคำสั่งทั้ง 8 ตัวตามลำดับใช้จริง เริ่มจาก `status` — โครงสร้างบทนี้คือสิ่งที่ `status` รายงานทุกครั้งที่เรียก
