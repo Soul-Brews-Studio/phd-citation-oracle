@@ -1,4 +1,4 @@
-import { readFile, stat, mkdir, readdir } from "node:fs/promises";
+import { readFile, stat, mkdir, readdir, unlink } from "node:fs/promises";
 import { statSync } from "node:fs";
 import { join, dirname } from "node:path";
 
@@ -348,17 +348,69 @@ async function checkStore(): Promise<string> {
   }
 }
 
+// ── hardware — what is actually doing the arithmetic ──
+// "GPU-backed" was an assertion in the docs and nowhere in the output, which is
+// the kind of claim that quietly stops being true. On Apple silicon the GPU is
+// reached through Metal with unified memory, so a model is either fully resident
+// or partly spilled to CPU — and ollama tells us which, exactly.
+
+function hardwareLine(): string {
+  const bytes = (n: number) => `${(n / 1024 ** 3).toFixed(0)} GB`;
+  try {
+    if (process.platform === "darwin") {
+      const sysctl = (key: string) => {
+        const r = Bun.spawnSync(["sysctl", "-n", key], { stdout: "pipe", stderr: "ignore" });
+        return new TextDecoder().decode(r.stdout).trim();
+      };
+      const chip = sysctl("machdep.cpu.brand_string");
+      const mem = Number(sysctl("hw.memsize"));
+      const cores = sysctl("hw.logicalcpu");
+      const silicon = process.arch === "arm64";
+      return (
+        `  ✓ hardware: ${chip || "Mac"} · ${process.arch} · ${cores} cores` +
+        (mem ? ` · ${bytes(mem)} ${silicon ? "unified memory" : "RAM"}` : "") +
+        (silicon ? " — Metal GPU available to ollama" : "")
+      );
+    }
+    return `  ✓ hardware: ${process.platform} · ${process.arch}`;
+  } catch {
+    return `  ✓ hardware: ${process.platform} · ${process.arch}`;
+  }
+}
+
+/** Is the embedding model actually on the GPU, or has it spilled to CPU? */
+async function ollamaResidency(): Promise<string> {
+  try {
+    const res = await fetch(`${OLLAMA_URL}/api/ps`, { signal: AbortSignal.timeout(1500) });
+    if (!res.ok) return "";
+    const json = (await res.json()) as { models?: Array<{ name?: string; size?: number; size_vram?: number; context_length?: number }> };
+    const m = (json.models ?? []).find((x) => (x.name ?? "").startsWith(OLLAMA_MODEL));
+    if (!m?.size) return "";
+    const pct = Math.round(((m.size_vram ?? 0) / m.size) * 100);
+    const mb = (m.size / 1024 ** 2).toFixed(0);
+    return (
+      `\n      └ ${m.name} · ${mb} MB · ${pct}% GPU` +
+      (pct === 100 ? " (fully resident — no CPU fallback)" : " ⚠ partly on CPU") +
+      (m.context_length ? ` · ${m.context_length} ctx` : "")
+    );
+  } catch {
+    return "";   // model simply not loaded yet; not worth a warning
+  }
+}
+
 async function checkEmbedBackend(): Promise<string> {
   try {
     const backend = await detectBackend();
     const vec = await embedOne("healthcheck");
     const where =
       backend === "ollama"
-        ? `ollama ${OLLAMA_MODEL} @ ${OLLAMA_URL} — local, GPU-backed, no token`
+        ? `ollama ${OLLAMA_MODEL} @ ${OLLAMA_URL} — local, no token, no egress`
         : backend === "cf-rest"
           ? `Cloudflare REST ${EMBED_MODEL} (token)`
           : `local worker ${LOCAL_WORKER_URL} (${EMBED_MODEL}, no token)`;
-    return `  ✓ embeddings: ${where} — ${vec.length}-dim`;
+    // Ask after embedding, not before: the healthcheck is what loads the model.
+    const residency = backend === "ollama" ? await ollamaResidency() : "";
+    return `  ✓ embeddings: ${where} — ${vec.length}-dim${residency}`;
   } catch (error) {
     return (
       `  ✗ no embedding backend reachable: ${error instanceof Error ? error.message : String(error)}\n` +
@@ -374,14 +426,20 @@ async function cmdStatus(): Promise<PluginResult> {
   const corpusLine = await stat(corpusPath)
     .then((s) => `  ✓ corpus present (${DEFAULT_CORPUS}) — ${s.size} bytes`)
     .catch(() => `  ⚠ corpus missing at ${DEFAULT_CORPUS}`);
-  const cardCount = (await readPaperCards()).length;
+  const raw = await readRawCards();
+  const cardCount = raw.length;
+  const withDoi = raw.filter((c) => typeof c.fm.doi === "string" && c.fm.doi).length;
+  const needAuthors = raw.filter((c) => !(c.fm.authors as string[] | undefined)?.length).length;
   const root = resolveRoot();
   const lines = [
     "── citation status ──",
     `  ✓ repo root: ${root.path} (${root.how})`,
-    `  ✓ ${cardCount} paper card(s) in ${PAPERS_DIR}`,
+    `  ${needAuthors ? "⚠" : "✓"} ${cardCount} paper card(s) in ${PAPERS_DIR}` +
+      ` — ${withDoi} with a DOI` +
+      (needAuthors ? `, ${needAuthors} still missing authors (citation doi --write)` : ", all citable"),
     corpusLine,
     await checkStore(),
+    hardwareLine(),
     await checkEmbedBackend(),
     await checkArraBackend(),
   ];
@@ -416,11 +474,23 @@ type Card = {
   topic: string;
   status: string;       // ok | needs-authors
   doi: string;
+  verified?: string;    // e.g. "crossref 2026-07-25" — provenance for the metadata
+  aka?: string;         // a previous citekey, kept so no key is ever lost
+  authorsUpstream?: string[];  // what the upstream list claimed, when it was wrong
   summary: string;
   relevance: string;
   citationRaw: string;
   notes: string;        // human-written, preserved across regeneration
 };
+
+/** APA-ish reference line, built from resolved metadata rather than parroted. */
+function fullCitation(c: Pick<Card, "authors" | "year" | "title" | "journal" | "volume" | "pages" | "doi">): string {
+  const list =
+    c.authors.length <= 1 ? (c.authors[0] ?? "")
+    : `${c.authors.slice(0, -1).join(", ")}, & ${c.authors[c.authors.length - 1]}`;
+  const vp = [c.volume, c.pages].filter(Boolean).join(", ");
+  return `${list} (${c.year}). ${c.title}. *${c.journal}*${vp ? `, ${vp}` : ""}.` + (c.doi ? ` https://doi.org/${c.doi}` : "");
+}
 
 /** "Atmospheric Measurement Techniques (Q1, IF ~4.0)" → parts. */
 function splitJournal(j: string): { journal: string; quartile: string; impactFactor: string } {
@@ -537,7 +607,11 @@ volume: ${yamlEscape(c.volume)}
 pages: ${yamlEscape(c.pages)}
 doi: ${yamlEscape(c.doi)}
 topic: ${yamlEscape(c.topic)}
-status: ${c.status}
+status: ${c.status}${c.verified ? `\nverified: ${yamlEscape(c.verified)}` : ""}${c.aka ? `\naka: ${c.aka}` : ""}${
+    c.authorsUpstream?.length
+      ? `\nauthors_upstream:\n${c.authorsUpstream.map((a) => `  - ${yamlEscape(a)}`).join("\n")}`
+      : ""
+  }
 tags: [paper, ${c.topic}]
 kind: paper
 ---
@@ -548,7 +622,13 @@ kind: paper
 
 **Thesis relevance** — ${c.relevance || "_not recorded_"}
 
-**Full citation** — ${c.citationRaw || "_not recorded upstream_"}
+**Full citation** — ${
+    // Upstream's line is authoritative when it has real authors; when it reads
+    // "[Authors]" it must not be echoed back over metadata we since verified.
+    c.authors.length && (!c.citationRaw || /^\[Authors?\]/i.test(c.citationRaw))
+      ? fullCitation(c)
+      : c.citationRaw || "_not recorded upstream_"
+  }
 ${c.status === "needs-authors" ? "\n> ⚠️ Authors are unrecorded upstream (the reference list reads `[Authors]`). Resolve before this paper can go into a `.bib`.\n" : ""}
 ## Notes
 
@@ -604,6 +684,17 @@ async function cmdCards(rest: string[]): Promise<PluginResult> {
   const dir = join(repoRoot(), PAPERS_DIR);
   await mkdir(dir, { recursive: true });
 
+  // A citekey is an identifier, not a derived value. Once a card exists for an
+  // id, that key is its name for good — otherwise `doi --rekey` would be quietly
+  // undone by the next `cards` run, which would recreate the placeholder card
+  // and orphan the resolved one. (Principle 1: keys are never silently reused.)
+  const existing = await readRawCards();
+  const keyForId = new Map<string, string>();
+  for (const c of existing) {
+    const id = typeof c.fm.id === "string" ? c.fm.id : "";
+    if (id) keyForId.set(id, typeof c.fm.citekey === "string" ? c.fm.citekey : c.name.replace(/\.md$/, ""));
+  }
+
   // Build cards first so citekey collisions can be disambiguated deterministically.
   const cards: Card[] = [];
   const used = new Map<string, number>();
@@ -614,10 +705,11 @@ async function cmdCards(rest: string[]): Promise<PluginResult> {
     const shortTitle = paperName(p.title) || p.title;
     const yearFromTitle = p.title.match(/\((\d{4})[a-z]?\)/)?.[1] ?? "";
     const year = parsed.year || yearFromTitle;
-    let key = citekeyFor(parsed.authors, year, parsed.journal || j.journal, String(p.id));
+    const inherited = keyForId.get(String(p.id));
+    let key = inherited ?? citekeyFor(parsed.authors, year, parsed.journal || j.journal, String(p.id));
     const seen = used.get(key) ?? 0;
     used.set(key, seen + 1);
-    if (seen) key = `${key}${String.fromCharCode(97 + seen)}`; // b, c, …
+    if (seen && !inherited) key = `${key}${String.fromCharCode(97 + seen)}`; // b, c, …
     cards.push({
       citekey: key,
       id: String(p.id),
@@ -647,9 +739,22 @@ async function cmdCards(rest: string[]): Promise<PluginResult> {
     if (existing) {
       c.notes = extractNotes(existing);
       if (c.notes) keptNotes++;
-      // A hand-added DOI must survive regeneration — it is the point of the .bib work.
+      // Anything resolved against Crossref outranks the upstream JSONL, which is
+      // exactly where the wrong journals and phantom page numbers came from. A
+      // regeneration that silently reverted verified metadata would be the same
+      // bug as losing a hand-added DOI, one level deeper.
       const fm = parseFrontmatter(existing);
-      if (typeof fm.doi === "string" && fm.doi) c.doi = fm.doi;
+      const keep = (k: string) => (typeof fm[k] === "string" ? (fm[k] as string) : "");
+      if (keep("doi")) c.doi = keep("doi");
+      if (keep("verified")) {
+        c.verified = keep("verified");
+        const fmAuthors = Array.isArray(fm.authors) ? (fm.authors as string[]) : [];
+        if (fmAuthors.length) { c.authors = fmAuthors; c.status = "ok"; }
+        for (const k of ["title", "journal", "volume", "pages"] as const) if (keep(k)) c[k] = keep(k);
+      }
+      if (keep("aka")) c.aka = keep("aka");
+      const upstream = Array.isArray(fm.authors_upstream) ? (fm.authors_upstream as string[]) : [];
+      if (upstream.length) c.authorsUpstream = upstream;
       updated++;
     } else created++;
     await Bun.write(path, renderCard(c));
@@ -1449,15 +1554,556 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
   };
 }
 
+// ── doi — resolve and verify against Crossref ──
+// The corpus arrived as JSONL with no DOIs and, for nine papers, no authors at
+// all (the upstream reference list literally reads "[Authors]"). Both are hard
+// blockers for a `.bib`, and both are exactly the kind of gap that tempts an LLM
+// to fill it in from memory. So this resolves them against Crossref — the
+// registration authority — and refuses anything it cannot match confidently.
+//
+// Two failure modes already cost us real time and are guarded here explicitly:
+//   1. A title search once ranked an *editorial comment* above the paper it
+//      commented on. Hence `type` must be "journal-article".
+//   2. An outside tool invented "Chen et al." for a paper actually by She et al.
+//      Hence authors are only ever taken FROM Crossref, never carried over.
+
+const CROSSREF_API = "https://api.crossref.org/works";
+// Crossref asks for a contact address in exchange for the faster "polite" pool.
+const CROSSREF_MAILTO = process.env.CROSSREF_MAILTO || "citation-oracle@soul-brews.studio";
+
+type CrossrefWork = {
+  DOI: string;
+  type: string;
+  title?: string[];
+  "container-title"?: string[];
+  issued?: { "date-parts"?: number[][] };
+  volume?: string;
+  page?: string;
+  "article-number"?: string;
+  author?: Array<{ family?: string; given?: string; name?: string }>;
+};
+
+/**
+ * Crossref serves XML-escaped text, so journal names arrive as
+ * "Environmental Science &amp; Technology". Writing that into a card would put a
+ * literal "&amp;" in the thesis bibliography.
+ */
+function decodeEntities(s: string): string {
+  return s
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&quot;/g, '"')
+    .replace(/&apos;|&#39;/g, "'")
+    .replace(/&nbsp;/g, " ");
+}
+
+/** Strip markup and punctuation so two spellings of one title compare equal. */
+function normalizeTitle(s: string): string {
+  return s
+    .replace(/<[^>]+>/g, " ")      // Crossref embeds <sub>/<sup> in titles
+    .replace(/[‐-―]/g, "-") // en/em dashes vs hyphen
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+/**
+ * Token F1 over words longer than three characters. Crude, but it separates
+ * "the same paper" (≥0.85) from "an adjacent paper by the same group" (~0.6),
+ * which is the distinction that actually matters here.
+ */
+function titleSimilarity(a: string, b: string): number {
+  const A = new Set(normalizeTitle(a).split(" ").filter((w) => w.length > 3));
+  const B = new Set(normalizeTitle(b).split(" ").filter((w) => w.length > 3));
+  if (!A.size || !B.size) return 0;
+  let hit = 0;
+  for (const w of A) if (B.has(w)) hit++;
+  const precision = hit / A.size;
+  const recall = hit / B.size;
+  return precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
+}
+
+function crossrefAuthors(w: CrossrefWork): string[] {
+  return (w.author ?? [])
+    .map((a) => {
+      if (!a.family) return decodeEntities(a.name?.trim() ?? "");
+      // "Sachit" → "S."; "Van der Berg" stays intact as the family name.
+      // Guard the first character: a given name recorded as "Ernest Kojo -"
+      // otherwise yields the nonsense initial "-.".
+      const initials = (a.given ?? "")
+        .split(/[\s.]+/)
+        .filter((g) => /^\p{L}/u.test(g))
+        .map((g) => `${g[0]!.toUpperCase()}.`)
+        .join(" ");
+      const family = decodeEntities(a.family);
+      return initials ? `${family}, ${initials}` : family;
+    })
+    .filter(Boolean);
+}
+
+function crossrefYear(w: CrossrefWork): string {
+  return String(w.issued?.["date-parts"]?.[0]?.[0] ?? "");
+}
+
+/** Nature-family journals number articles rather than paginating them. */
+function crossrefPages(w: CrossrefWork): string {
+  return w.page ?? w["article-number"] ?? "";
+}
+
+function surnameSet(authors: string[]): Set<string> {
+  return new Set(authors.map((a) => a.split(",")[0]!.trim().toLowerCase()).filter(Boolean));
+}
+
+/**
+ * How much of what we already believed about authorship survives contact with
+ * Crossref. Titles can match 1.00 and still be the wrong paper — a review and
+ * the study it reviews often share a title almost word for word — so when a card
+ * already names authors, they are the sharpest disambiguator available. A score
+ * of 0 with authors on both sides means the two records are about different
+ * papers, whatever the titles say.
+ */
+function authorAgreement(known: string[], found: string[]): number {
+  const a = surnameSet(known), b = surnameSet(found);
+  if (!a.size || !b.size) return 1;   // nothing to disagree about
+  let hit = 0;
+  for (const s of a) if (b.has(s)) hit++;
+  return hit / a.size;
+}
+
+type Match = {
+  work: CrossrefWork;
+  similarity: number;
+  yearMatch: boolean;
+  authorScore: number;
+  /** Title + journal + year all agree: this is the same paper, whoever wrote it. */
+  strong: boolean;
+  confident: boolean;
+};
+
+async function crossrefSearch(title: string, journal: string, year: string, knownAuthors: string[] = []): Promise<Match[]> {
+  const url = new URL(CROSSREF_API);
+  url.searchParams.set("query.bibliographic", [title, journal, year].filter(Boolean).join(" "));
+  url.searchParams.set("rows", "5");
+  url.searchParams.set("select", "DOI,title,container-title,type,issued,volume,page,article-number,author");
+  url.searchParams.set("mailto", CROSSREF_MAILTO);
+
+  const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
+  if (!res.ok) throw new Error(`Crossref ${res.status}`);
+  const json = (await res.json()) as { message?: { items?: CrossrefWork[] } };
+
+  return (json.message?.items ?? []).map((work) => {
+    const similarity = titleSimilarity(title, (work.title ?? [""])[0] ?? "");
+    const found = crossrefYear(work);
+    // Online-first publication routinely shifts the year by one.
+    const yearMatch = !year || !found || Math.abs(Number(found) - Number(year)) <= 1;
+    const authorScore = authorAgreement(knownAuthors, crossrefAuthors(work));
+    const journalMatch =
+      !journal || !(work["container-title"] ?? [])[0] ||
+      normalizeTitle(decodeEntities((work["container-title"] ?? [""])[0] ?? "")) === normalizeTitle(journal);
+    // A near-exact match on a long, distinctive title in the same journal and year
+    // identifies the paper on its own. Two different papers do not share a title
+    // like "Spatiotemporally continuous PM2.5 dataset in the Mekong River Basin".
+    const strong = work.type === "journal-article" && similarity >= 0.95 && journalMatch && yearMatch;
+    return {
+      work,
+      similarity,
+      yearMatch,
+      authorScore,
+      strong,
+      // A preprint (`posted-content`) of the same paper scores 1.0 on title, so
+      // the type check is doing real work, not ceremony. Author agreement guards
+      // the weaker band, where a review and its subject can look alike.
+      confident:
+        strong || (work.type === "journal-article" && similarity >= 0.85 && yearMatch && authorScore >= 0.5),
+    };
+  }).sort((a, b) => b.similarity - a.similarity);
+}
+
+type RawCard = { path: string; name: string; text: string; fm: Record<string, string | string[]> };
+
+/** Cards as they are on disk — `readPaperCards` reshapes for search and drops fields. */
+async function readRawCards(): Promise<RawCard[]> {
+  const dir = join(repoRoot(), PAPERS_DIR);
+  const NOT_CARDS = new Set(["INDEX.md", "README.md"]);
+  let names: string[] = [];
+  try {
+    names = (await readdir(dir)).filter((n) => n.endsWith(".md") && !NOT_CARDS.has(n));
+  } catch {
+    return [];
+  }
+  const out: RawCard[] = [];
+  for (const name of names.sort()) {
+    const path = join(dir, name);
+    const text = await readFile(path, "utf-8").catch(() => "");
+    if (text) out.push({ path, name, text, fm: parseFrontmatter(text) });
+  }
+  return out;
+}
+
+/**
+ * Rewrite frontmatter fields in place, leaving every other byte untouched.
+ * Deliberately surgical rather than re-rendering the card: a card carries hand
+ * written notes and an edited body, and a round-trip through renderCard() would
+ * quietly normalise things nobody asked it to touch.
+ */
+function patchFrontmatter(text: string, updates: Record<string, string | string[]>): string {
+  const m = text.match(/^---\n([\s\S]*?)\n---/);
+  if (!m) return text;
+  const lines = m[1].split("\n");
+  const out: string[] = [];
+  const applied = new Set<string>();
+
+  for (let i = 0; i < lines.length; i++) {
+    const key = lines[i].match(/^([A-Za-z_][A-Za-z0-9_]*):/)?.[1];
+    if (!key || !(key in updates)) {
+      out.push(lines[i]);
+      continue;
+    }
+    // Swallow the old value, including any indented list items beneath it.
+    while (i + 1 < lines.length && /^\s+-\s+/.test(lines[i + 1])) i++;
+    const value = updates[key];
+    if (Array.isArray(value)) {
+      out.push(value.length ? `${key}:\n${value.map((v) => `  - ${yamlEscape(v)}`).join("\n")}` : `${key}: []`);
+    } else {
+      out.push(`${key}: ${key === "status" || key === "citekey" ? value : yamlEscape(value)}`);
+    }
+    applied.add(key);
+  }
+
+  for (const [key, value] of Object.entries(updates)) {
+    if (applied.has(key)) continue;
+    out.push(Array.isArray(value)
+      ? (value.length ? `${key}:\n${value.map((v) => `  - ${yamlEscape(v)}`).join("\n")}` : `${key}: []`)
+      : `${key}: ${key === "status" || key === "citekey" ? value : yamlEscape(value)}`);
+  }
+
+  return text.replace(m[0], `---\n${out.join("\n")}\n---`);
+}
+
+/**
+ * Once authors are known, three places in the body still say otherwise: the H1,
+ * the "[Authors]." citation line, and the needs-authors warning. Leaving them is
+ * worse than never having resolved the paper — the card would contradict itself.
+ */
+function refreshCardBody(text: string, authors: string[], year: string, journal: string, shortTitle: string, fullTitle: string, volume: string, pages: string, doi: string, forceCitation = false): string {
+  let out = text;
+  const label = citeLabel(authors, year, journal);
+  out = out.replace(/^#\s+.*$/m, `# ${label} — ${shortTitle || fullTitle}`);
+  out = out.replace(/\n>\s*⚠️ Authors are unrecorded upstream[^\n]*\n/, "\n");
+
+  const authorList =
+    authors.length <= 1 ? (authors[0] ?? "")
+    : `${authors.slice(0, -1).join(", ")}, & ${authors[authors.length - 1]}`;
+  const vp = [volume, pages].filter(Boolean).join(", ");
+  const citation =
+    `${authorList} (${year}). ${fullTitle}. *${journal}*${vp ? `, ${vp}` : ""}.` +
+    (doi ? ` https://doi.org/${doi}` : "");
+  out = out.replace(/(\*\*Full citation\*\*\s*—\s*)(.*)/, (_full, prefix: string, existing: string) =>
+    // Only overwrite the placeholder — a hand-written citation is human work.
+    // The exception is a corrected byline: leaving the old reference line would
+    // make the card contradict its own frontmatter, which is worse than either.
+    forceCitation || /^\[Authors?\]/i.test(existing.trim()) || !existing.trim()
+      ? `${prefix}${citation}`
+      : `${prefix}${existing}`);
+  return out;
+}
+
+async function cmdDoi(rest: string[]): Promise<PluginResult> {
+  const write = rest.includes("--write");
+  const all = rest.includes("--all");
+  const rekey = rest.includes("--rekey");
+  const keepAuthors = rest.includes("--keep-authors");
+  const only = new Set(rest.filter((a) => !a.startsWith("--")));
+
+  const cards = await readRawCards();
+  if (!cards.length) return { ok: false, error: `no cards in ${PAPERS_DIR} — run "citation cards" first` };
+
+  const str = (fm: RawCard["fm"], k: string) => (typeof fm[k] === "string" ? (fm[k] as string) : "");
+  const targets = cards.filter((c) => {
+    if (only.size) return only.has(str(c.fm, "citekey")) || only.has(c.name.replace(/\.md$/, ""));
+    if (all) return true;
+    const authors = Array.isArray(c.fm.authors) ? (c.fm.authors as string[]) : [];
+    return !str(c.fm, "doi") || !authors.length;   // the two things that block a .bib
+  });
+
+  if (!targets.length) {
+    return { ok: true, output: `✦ nothing to resolve — every card already has a DOI and authors (${cards.length} cards).` };
+  }
+
+  const lines: string[] = [`✦ resolving ${targets.length} of ${cards.length} card(s) against Crossref${write ? "" : "  [dry run — pass --write to save]"}`, ""];
+  let resolved = 0, ambiguous = 0, failed = 0, renamed = 0;
+  const disputedAuthors: string[] = [];
+  // Grows as we rename, so two cards in one run cannot claim the same new key.
+  const takenKeys = new Set(cards.map((c) => c.name.replace(/\.md$/, "")));
+
+  for (const card of targets) {
+    const citekey = str(card.fm, "citekey") || card.name.replace(/\.md$/, "");
+    const title = str(card.fm, "title");
+    const journal = str(card.fm, "journal");
+    const year = str(card.fm, "year");
+
+    const knownAuthors = Array.isArray(card.fm.authors) ? (card.fm.authors as string[]) : [];
+    let matches: Match[];
+    try {
+      matches = await crossrefSearch(title, journal, year, knownAuthors);
+    } catch (error) {
+      lines.push(`  ✗ ${citekey} — Crossref unreachable: ${error instanceof Error ? error.message : String(error)}`);
+      failed++;
+      continue;
+    }
+
+    const best = matches.find((m) => m.confident);
+    if (!best) {
+      const top = matches[0];
+      const why = !top
+        ? "no results"
+        : top.work.type !== "journal-article" ? `top hit is a ${top.work.type}, not a journal article`
+        : top.similarity < 0.85 ? `best title similarity only ${top.similarity.toFixed(2)}`
+        : top.authorScore < 0.5 ? `authors disagree — card says ${surnameSet(knownAuthors).values().next().value ?? "?"}, Crossref says ${surnameSet(crossrefAuthors(top.work)).values().next().value ?? "?"}`
+        : "year mismatch";
+      lines.push(
+        `  ? ${citekey} — no confident match (${why})` +
+        (top ? `\n      best: [${top.similarity.toFixed(2)}] ${top.work.type} ${top.work.DOI}\n      ${((top.work.title ?? [""])[0] ?? "").slice(0, 90)}` : ""),
+      );
+      ambiguous++;
+      continue;
+    }
+
+    const w = best.work;
+    const authors = crossrefAuthors(w);
+    const crJournal = decodeEntities((w["container-title"] ?? [""])[0] ?? "");
+    const crTitle = decodeEntities(((w.title ?? [""])[0] ?? title).replace(/<[^>]+>/g, "").replace(/\s+/g, " ").trim());
+    const notes: string[] = [];
+    // The corpus's journal is sometimes simply wrong — worth saying out loud,
+    // because a wrong journal in a thesis bibliography is a citation error.
+    if (crJournal && normalizeTitle(crJournal) !== normalizeTitle(journal)) notes.push(`journal: "${journal}" → "${crJournal}"`);
+    const crPages = crossrefPages(w);
+    if (crPages && crPages !== str(card.fm, "pages")) notes.push(`pages: "${str(card.fm, "pages")}" → "${crPages}"`);
+
+    // The upstream reference list has been caught crediting the wrong first
+    // author (once, the paper's LAST author, misspelled). Crossref is the
+    // publisher's own registered metadata, so on a strong match it wins — but the
+    // old list is preserved, never erased, and the swap is always announced.
+    const disputed = knownAuthors.length > 0 && best.authorScore < 0.5 && best.strong;
+    const takeAuthors = !knownAuthors.length || (disputed && !keepAuthors);
+
+    lines.push(`  ✓ ${citekey} [${best.similarity.toFixed(2)}]${best.strong && best.authorScore < 1 ? " strong" : ""} ${w.DOI}`);
+    lines.push(`      ${authors.slice(0, 3).join("; ")}${authors.length > 3 ? ` … +${authors.length - 3}` : ""} (${crossrefYear(w)})`);
+    if (disputed) {
+      lines.push(`      ⚠ AUTHORS CORRECTED — upstream said "${knownAuthors[0]}", Crossref says "${authors[0]}"`);
+      lines.push(`        upstream list kept in authors_upstream:${keepAuthors ? " (not replaced: --keep-authors)" : ""}`);
+      disputedAuthors.push(citekey);
+    }
+    for (const n of notes) lines.push(`      ↳ ${n}`);
+    resolved++;
+
+    if (!write) continue;
+
+    const updates: Record<string, string | string[]> = {
+      doi: w.DOI,
+      status: "ok",
+      title: crTitle,
+      journal: crJournal || journal,
+      volume: w.volume ?? str(card.fm, "volume"),
+      pages: crPages || str(card.fm, "pages"),
+      verified: `crossref ${new Date().toISOString().slice(0, 10)}`,
+    };
+    if (takeAuthors) updates.authors = authors;
+    if (disputed) updates.authors_upstream = knownAuthors;
+
+    let next = patchFrontmatter(card.text, updates);
+    next = refreshCardBody(
+      next,
+      (updates.authors as string[]) ?? (card.fm.authors as string[]) ?? [],
+      String(updates.title ? crossrefYear(w) || year : year),
+      String(updates.journal),
+      str(card.fm, "short_title"),
+      crTitle,
+      String(updates.volume),
+      String(updates.pages),
+      w.DOI,
+      takeAuthors && knownAuthors.length > 0,
+    );
+
+    // A citekey like `npjclimate2023` was only ever a placeholder for "we don't
+    // know who wrote this". Now that we do, `yu2023` is what a human will type.
+    // The old key is kept in `aka:` — nothing is deleted, and `cards` reads it
+    // back so regeneration never resurrects the placeholder.
+    let path = card.path;
+    if (rekey && authors.length) {
+      const proposed = citekeyFor(authors, crossrefYear(w) || year, crJournal, citekey);
+      if (proposed !== citekey && !takenKeys.has(proposed)) {
+        takenKeys.add(proposed);
+        next = patchFrontmatter(next, { citekey: proposed, aka: citekey });
+        path = join(dirname(card.path), `${proposed}.md`);
+        lines.push(`      ↳ rekeyed: ${citekey} → ${proposed} (old key kept as aka:)`);
+        renamed++;
+      }
+    }
+
+    await Bun.write(path, next);
+    // Write the new name first, then drop the old one — if anything fails in
+    // between, the card survives under one name or the other, never neither.
+    if (path !== card.path) await unlink(card.path);
+  }
+
+  lines.push("");
+  lines.push(`  resolved ${resolved} · ambiguous ${ambiguous} · failed ${failed}${renamed ? ` · rekeyed ${renamed}` : ""}`);
+  if (disputedAuthors.length) {
+    lines.push(
+      `\n  ⚠ ${disputedAuthors.length} card(s) had the wrong authors upstream: ${disputedAuthors.join(", ")}`,
+      `    These would have become citation errors in the thesis. Worth telling the parent oracle,`,
+      `    whose LITERATURE_REVIEW_PAPERS.md is where the wrong bylines came from.`,
+    );
+  }
+  if (!write && resolved) lines.push(`\nNothing was written. Re-run with --write to save${rekey ? "" : " (add --rekey to also rename placeholder citekeys)"}.`);
+  if (write && renamed) lines.push(`\nRe-index so the store matches the new keys: citation index --vault`);
+  return { ok: failed === 0, output: lines.join("\n") };
+}
+
+// ── bib — the cards as BibTeX ──
+// The whole point of this oracle: 62 markdown cards become \cite{} keys a thesis
+// can actually use. Entries missing authors or a DOI are NOT silently dropped —
+// they are written as commented-out stubs, so the bibliography stays honest
+// about what it does not yet have, and nothing disappears from the corpus.
+
+/** BibTeX's escapes. Titles keep their braces so styles cannot lowercase them. */
+function bibEscape(s: string): string {
+  return s
+    .replace(/[\\]/g, "\\textbackslash{}")
+    .replace(/([&%$#_])/g, "\\$1")
+    .replace(/~/g, "\\textasciitilde{}")
+    .replace(/\^/g, "\\textasciicircum{}")
+    .replace(/[{}]/g, "");
+}
+
+function bibEntry(fields: Array<[string, string]>, key: string, type = "article"): string {
+  const width = Math.max(...fields.map(([k]) => k.length));
+  const body = fields
+    .filter(([, v]) => v)
+    .map(([k, v]) => `  ${k.padEnd(width)} = {${v}}`)
+    .join(",\n");
+  return `@${type}{${key},\n${body}\n}`;
+}
+
+async function cmdBib(rest: string[]): Promise<PluginResult> {
+  const outArg = rest.find((a) => a.endsWith(".bib"));
+  const byTopic = rest.includes("--by-topic");
+  const cards = await readRawCards();
+  if (!cards.length) return { ok: false, error: `no cards in ${PAPERS_DIR} — run "citation cards" first` };
+
+  const str = (fm: RawCard["fm"], k: string) => (typeof fm[k] === "string" ? (fm[k] as string) : "");
+
+  type Entry = { key: string; topic: string; year: string; bib: string; complete: boolean; missing: string[] };
+  const entries: Entry[] = [];
+
+  for (const card of cards) {
+    const fm = card.fm;
+    const key = str(fm, "citekey") || card.name.replace(/\.md$/, "");
+    const authors = Array.isArray(fm.authors) ? (fm.authors as string[]) : [];
+    const title = str(fm, "title");
+    const journal = str(fm, "journal");
+    const year = str(fm, "year");
+    const doi = str(fm, "doi");
+
+    const missing: string[] = [];
+    if (!authors.length) missing.push("authors");
+    if (!title) missing.push("title");
+    if (!journal) missing.push("journal");
+    if (!year) missing.push("year");
+    if (!doi) missing.push("doi");
+
+    const fields: Array<[string, string]> = [
+      ["author", authors.map(bibEscape).join(" and ")],
+      ["title", `{${bibEscape(title)}}`],   // inner braces protect capitalisation
+      ["journal", bibEscape(journal)],
+      ["year", year],
+      ["volume", str(fm, "volume")],
+      ["pages", str(fm, "pages")],
+      ["doi", doi],
+      ["note", str(fm, "verified") ? `verified via ${str(fm, "verified")}` : ""],
+    ];
+
+    entries.push({
+      key,
+      topic: str(fm, "topic") || "uncategorized",
+      year,
+      // A DOI is desirable, not mandatory — a paper with real authors, title,
+      // journal and year is perfectly citable. Only missing authors makes an
+      // entry unusable, because BibTeX would render it as an anonymous work.
+      complete: authors.length > 0 && !!title && !!journal && !!year,
+      missing,
+      bib: bibEntry(fields, key),
+    });
+  }
+
+  const complete = entries.filter((e) => e.complete);
+  const withheld = entries.filter((e) => !e.complete);
+  const noDoi = complete.filter((e) => e.missing.includes("doi"));
+
+  const sortKey = (e: Entry) => (byTopic ? `${e.topic} ${e.key}` : e.key);
+  complete.sort((a, b) => sortKey(a).localeCompare(sortKey(b)));
+
+  const header = [
+    `% Citation Oracle ✦ — generated by "citation bib" from ${PAPERS_DIR}/`,
+    `% ${complete.length} citable entries of ${entries.length} cards · ${complete.length - noDoi.length} with a DOI`,
+    `% The cards are the source of truth: edit those, not this file.`,
+    `% Regenerate: citation bib`,
+    "",
+  ];
+
+  const body: string[] = [];
+  let lastTopic = "";
+  for (const e of complete) {
+    if (byTopic && e.topic !== lastTopic) {
+      body.push(`% ── ${e.topic} ──`, "");
+      lastTopic = e.topic;
+    }
+    body.push(e.bib, "");
+  }
+
+  if (withheld.length) {
+    body.push(
+      `% ── withheld: ${withheld.length} card(s) not citable yet ──`,
+      `% Kept here rather than dropped — the gap is part of the record. Fill them`,
+      `% with: citation doi --write   (resolves authors + DOI against Crossref)`,
+      "",
+      ...withheld.flatMap((e) => [
+        `% ${e.key} — missing: ${e.missing.join(", ")}`,
+        ...e.bib.split("\n").map((l) => `% ${l}`),
+        "",
+      ]),
+    );
+  }
+
+  const outPath = join(repoRoot(), outArg ?? "artifacts/citation.bib");
+  await mkdir(dirname(outPath), { recursive: true });
+  await Bun.write(outPath, [...header, ...body].join("\n"));
+
+  const out = [
+    `✦ ${complete.length} citable entr${complete.length === 1 ? "y" : "ies"} → ${outPath}`,
+    `  ${complete.length - noDoi.length}/${complete.length} carry a DOI${noDoi.length ? ` · ${noDoi.length} without` : ""}`,
+  ];
+  if (withheld.length) {
+    out.push(`  ⚠ ${withheld.length} withheld (commented in the file, nothing lost): ${withheld.map((e) => e.key).join(", ")}`);
+    out.push(`     resolve with: citation doi --write`);
+  }
+  out.push(`\nUse in LaTeX:  \\bibliography{${(outArg ?? "artifacts/citation.bib").replace(/\.bib$/, "")}}   then \\cite{${complete[0]?.key ?? "citekey"}}`);
+  return { ok: true, output: out.join("\n") };
+}
+
 // ── dispatch ──
 
 function helpText(): string {
-  return `citation — Citation Oracle's own maw plugin (index/search/visualize the PhD literature corpus)
+  return `citation — Citation Oracle's own maw plugin (the PhD literature corpus: cards → .bib → constellation)
 
 Usage:
-  maw citation status                        Corpus + arra backend + LanceDB + Cloudflare embed, one check
+  maw citation status                        Root + cards + store + embedder + hardware, one check
   maw citation cards [corpus.jsonl]          Build/refresh one markdown card per paper in ${PAPERS_DIR}/ (+ INDEX.md). Your \`## Notes\` and any \`doi:\` you add are preserved
-  maw citation index [--vault] [corpus.jsonl]  Embed the cards into LanceDB (falls back to the JSONL if no cards exist). --vault also indexes retros/lessons/research so search spans both
+  maw citation doi [--write] [--rekey] [--all] [citekey…]  Resolve authors + DOI against Crossref. Dry run unless --write; --rekey renames placeholder citekeys (old key kept as \`aka:\`)
+  maw citation bib [out.bib] [--by-topic]    Cards → BibTeX (default artifacts/citation.bib). Entries missing authors are commented, never dropped
+  maw citation index [--vault] [corpus.jsonl]  Embed the cards into the local store (falls back to the JSONL if no cards exist). --vault also indexes retros/lessons/research so search spans both
   maw citation search <query> [-k N] [--json]  Semantic search over indexed papers (default k=5)
   maw citation serve [--port N] [--threshold N] [--quiet]  Serve the interactive 2D constellation (default port 5556, verbose by default; alias: visualize)
   maw citation graph [--threshold N] [--out PATH] [--html [PATH]]  Render the 2D labeled similarity network → PNG (default artifacts/citation-network.png, threshold 0.5); --html also writes the interactive page
@@ -1475,11 +2121,13 @@ Env:
   CF_EMBED_WORKER_URL   shared local embed worker (default http://localhost:18787, no token)
   CF_EMBED_MODEL        embed model (default @cf/baai/bge-m3, 1024-dim, multilingual)
   CITATION_VISUALIZE_PORT  default port for visualize (default 5556)
+  CROSSREF_MAILTO       contact address for Crossref's polite pool (faster, kinder)
 
-Roadmap: bib (JSONL → .bib keys), graph (citation edges). Not built yet — cite what's real.`;
+Roadmap: citation edges (which paper cites which) — the graph currently draws semantic
+similarity, not citation. Not built yet — cite what's real.`;
 }
 
-const KNOWN_COMMANDS = ["status", "cards", "index", "search", "serve", "visualize", "graph"] as const;
+const KNOWN_COMMANDS = ["status", "cards", "doi", "bib", "index", "search", "serve", "visualize", "graph"] as const;
 
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -1517,6 +2165,10 @@ export async function handler(ctx: InvokeContext): Promise<PluginResult> {
       return cmdVisualize(rest);
     case "graph":
       return cmdGraph(rest);
+    case "doi":
+      return cmdDoi(rest);
+    case "bib":
+      return cmdBib(rest);
     case undefined:
       return { ok: true, output: helpText() };
     default: {
