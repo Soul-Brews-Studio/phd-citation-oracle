@@ -11,12 +11,14 @@ journal: "ScienceAsia"
 quartile: "Q3"
 impact_factor: ""
 volume: "48"
-pages: "1-8"
+pages: "75"
 doi: "10.2306/scienceasia1513-1874.2022.001"
 topic: "satellite-pm25-products"
 status: ok
 tags: [paper, satellite-pm25-products, imported-2026-07-25]
 kind: paper
+verified: "crossref 2026-07-25"
+issue: "1"
 ---
 
 # Nakapan & Hongthong (2022) — MAIAC Surface Reflectance PM2.5, N. Thailand

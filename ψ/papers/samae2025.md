@@ -1,7 +1,7 @@
 ---
 citekey: samae2025
 id: "2.1.5"
-title: "Precision and accuracy analysis of PM2.5 light-scattering sensor: Field and laboratory experiments"
+title: "Precision and Accuracy Analysis of PM2.5 Light-Scattering Sensor: Field and Laboratory Experiments"
 short_title: "DustBoy Precision and Accuracy"
 authors:
   - "Samae, H."
@@ -14,10 +14,12 @@ journal: "Atmosphere"
 quartile: "Q2"
 impact_factor: "2.9"
 volume: "16"
+issue: "1"
 pages: "76"
-doi: ""
+doi: "10.3390/atmos16010076"
 topic: "low-cost-sensor-calibration"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, low-cost-sensor-calibration]
 kind: paper
 ---

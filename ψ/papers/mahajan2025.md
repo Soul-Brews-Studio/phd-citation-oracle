@@ -11,10 +11,12 @@ journal: "npj Climate and Atmospheric Science"
 quartile: "Q1"
 impact_factor: "9.0"
 volume: "8"
+issue: "1"
 pages: "257"
-doi: ""
+doi: "10.1038/s41612-025-01145-2"
 topic: "low-cost-sensor-calibration"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, low-cost-sensor-calibration]
 kind: paper
 ---

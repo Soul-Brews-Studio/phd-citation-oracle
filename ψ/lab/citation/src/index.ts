@@ -470,6 +470,7 @@ type Card = {
   quartile: string;
   impactFactor: string;
   volume: string;
+  issue: string;        // BibTeX's `number` — some styles require it
   pages: string;
   topic: string;
   status: string;       // ok | needs-authors
@@ -604,6 +605,7 @@ journal: ${yamlEscape(c.journal)}
 quartile: ${yamlEscape(c.quartile)}
 impact_factor: ${yamlEscape(c.impactFactor)}
 volume: ${yamlEscape(c.volume)}
+issue: ${yamlEscape(c.issue)}
 pages: ${yamlEscape(c.pages)}
 doi: ${yamlEscape(c.doi)}
 topic: ${yamlEscape(c.topic)}
@@ -721,6 +723,7 @@ async function cmdCards(rest: string[]): Promise<PluginResult> {
       quartile: j.quartile,
       impactFactor: j.impactFactor,
       volume: parsed.volume,
+      issue: "",
       pages: parsed.pages,
       topic: p.topic ?? "uncategorized",
       status: parsed.authors.length ? "ok" : "needs-authors",
@@ -750,7 +753,7 @@ async function cmdCards(rest: string[]): Promise<PluginResult> {
         c.verified = keep("verified");
         const fmAuthors = Array.isArray(fm.authors) ? (fm.authors as string[]) : [];
         if (fmAuthors.length) { c.authors = fmAuthors; c.status = "ok"; }
-        for (const k of ["title", "journal", "volume", "pages"] as const) if (keep(k)) c[k] = keep(k);
+        for (const k of ["title", "journal", "volume", "issue", "pages"] as const) if (keep(k)) c[k] = keep(k);
       }
       if (keep("aka")) c.aka = keep("aka");
       const upstream = Array.isArray(fm.authors_upstream) ? (fm.authors_upstream as string[]) : [];
@@ -760,34 +763,67 @@ async function cmdCards(rest: string[]): Promise<PluginResult> {
     await Bun.write(path, renderCard(c));
   }
 
-  // Browsable index, thesis order (by id), grouped by topic.
-  const byTopic = new Map<string, Card[]>();
-  for (const c of cards) {
-    if (!byTopic.has(c.topic)) byTopic.set(c.topic, []);
-    byTopic.get(c.topic)!.push(c);
+  // The index describes the DIRECTORY, not this import. Cards ingested from
+  // outside research (there are six) have no row in the JSONL, and building the
+  // contents page from `cards` alone quietly dropped them from it.
+  const onDisk = await readRawCards();
+  const fmStr = (c: RawCard, k: string) => (typeof c.fm[k] === "string" ? (c.fm[k] as string) : "");
+  const byTopic = new Map<string, RawCard[]>();
+  for (const c of onDisk) {
+    const topic = fmStr(c, "topic") || "uncategorized";
+    if (!byTopic.has(topic)) byTopic.set(topic, []);
+    byTopic.get(topic)!.push(c);
   }
-  const needAuthors = cards.filter((c) => c.status === "needs-authors");
+  for (const list of byTopic.values()) {
+    list.sort((a, b) => fmStr(a, "id").localeCompare(fmStr(b, "id"), undefined, { numeric: true }));
+  }
+  const needAuthors = onDisk.filter((c) => !(c.fm.authors as string[] | undefined)?.length);
+  const withDoi = onDisk.filter((c) => fmStr(c, "doi")).length;
+  const corrected = onDisk.filter((c) => (c.fm.authors_upstream as string[] | undefined)?.length);
   const indexMd = [
     "# Paper cards",
     "",
-    `${cards.length} papers, one markdown card each — the canonical store. Regenerate with`,
-    "`maw citation cards` (your `## Notes` and any `doi:` you add are preserved).",
+    `${onDisk.length} papers, one markdown card each — the canonical store. Regenerate with`,
+    "`citation cards` (your `## Notes` and any `doi:` you add are preserved).",
     "",
-    `Generated from \`${corpusArg ?? DEFAULT_CORPUS}\`${citations.size ? ` + ${citations.size} upstream citations` : ""}.`,
+    `${withDoi}/${onDisk.length} carry a Crossref-verified DOI. Resolve the rest with \`citation doi --write\`,`,
+    "then build the bibliography with `citation bib`.",
+    "",
+    `Imported from \`${corpusArg ?? DEFAULT_CORPUS}\`${citations.size ? ` + ${citations.size} upstream citations` : ""};`,
+    "cards added by research ingest are listed here too.",
     "",
     ...[...byTopic.keys()].sort().flatMap((topic) => [
       `## ${topic} (${byTopic.get(topic)!.length})`,
       "",
-      "| id | citekey | paper | journal |",
-      "|---|---|---|---|",
-      ...byTopic.get(topic)!.map((c) =>
-        `| ${c.id} | [\`${c.citekey}\`](${c.citekey}.md) | ${c.shortTitle.replace(/\|/g, "\\|")} | ${c.journal.replace(/\|/g, "\\|")}${c.quartile ? ` (${c.quartile})` : ""} |`),
+      "| id | citekey | paper | journal | doi |",
+      "|---|---|---|---|---|",
+      ...byTopic.get(topic)!.map((c) => {
+        const key = fmStr(c, "citekey") || c.name.replace(/\.md$/, "");
+        const short = (fmStr(c, "short_title") || fmStr(c, "title")).replace(/\|/g, "\\|");
+        const journal = fmStr(c, "journal").replace(/\|/g, "\\|");
+        const q = fmStr(c, "quartile");
+        const doi = fmStr(c, "doi");
+        return `| ${fmStr(c, "id")} | [\`${key}\`](${c.name}) | ${short} | ${journal}${q ? ` (${q})` : ""} | ${doi ? `[✓](https://doi.org/${doi})` : "—"} |`;
+      }),
       "",
     ]),
     ...(needAuthors.length
       ? ["## ⚠️ Needs authors before `.bib`", "",
          `${needAuthors.length} card(s) whose authors are unrecorded upstream (the reference list reads \`[Authors]\`):`, "",
-         ...needAuthors.map((c) => `- \`${c.citekey}\` (${c.id}) — ${c.shortTitle}`), ""]
+         ...needAuthors.map((c) => `- \`${fmStr(c, "citekey")}\` (${fmStr(c, "id")}) — ${fmStr(c, "short_title")}`), ""]
+      : []),
+    ...(corrected.length
+      ? ["## Bylines corrected against Crossref", "",
+         `${corrected.length} card(s) were credited to the wrong first author upstream. The claim we`,
+         "inherited is kept in each card's `authors_upstream:` — the correction is part of the record,",
+         "not a silent overwrite.", "",
+         "| citekey | upstream claimed | actually (Crossref) |",
+         "|---|---|---|",
+         ...corrected.map((c) => {
+           const was = (c.fm.authors_upstream as string[])[0] ?? "?";
+           const now = ((c.fm.authors as string[]) ?? [])[0] ?? "?";
+           return `| \`${fmStr(c, "citekey")}\` | ${was} | ${now} |`;
+         }), ""]
       : []),
   ].join("\n");
   await Bun.write(join(dir, "INDEX.md"), indexMd);
@@ -799,7 +835,8 @@ async function cmdCards(rest: string[]): Promise<PluginResult> {
     `  index: ${join(dir, "INDEX.md")}`,
   ];
   if (needAuthors.length) {
-    out.push(`  ⚠ ${needAuthors.length} card(s) need authors before BibTeX: ${needAuthors.map((c) => c.citekey).join(", ")}`);
+    out.push(`  ⚠ ${needAuthors.length} card(s) need authors before BibTeX: ${needAuthors.map((c) => fmStr(c, "citekey")).join(", ")}`);
+    out.push(`     resolve them against Crossref: citation doi --write`);
   }
   out.push(`\nNext: maw citation index   (cards are picked up automatically)`);
   return { ok: true, output: out.join("\n") };
@@ -1578,6 +1615,7 @@ type CrossrefWork = {
   "container-title"?: string[];
   issued?: { "date-parts"?: number[][] };
   volume?: string;
+  issue?: string;
   page?: string;
   "article-number"?: string;
   author?: Array<{ family?: string; given?: string; name?: string }>;
@@ -1609,20 +1647,29 @@ function normalizeTitle(s: string): string {
 }
 
 /**
- * Token F1 over words longer than three characters. Crude, but it separates
- * "the same paper" (≥0.85) from "an adjacent paper by the same group" (~0.6),
- * which is the distinction that actually matters here.
+ * Token overlap over words longer than three characters. Crude, but it separates
+ * "the same paper" from "an adjacent paper by the same group", which is the
+ * distinction that actually matters here.
+ *
+ * Precision and recall are kept apart on purpose. Hand-kept reference lists
+ * routinely drop a subtitle — the corpus stored "LGHAP: the Long-term Gap-free
+ * High-resolution Air Pollutant concentration dataset" for a paper that really
+ * ends "…, derived via tensor-flow-based multimodal data fusion". Every word of
+ * the stored title is in the real one (precision 1.0) while F1 falls to 0.72.
+ * Containment is the signal there; symmetry would throw it away.
  */
-function titleSimilarity(a: string, b: string): number {
-  const A = new Set(normalizeTitle(a).split(" ").filter((w) => w.length > 3));
-  const B = new Set(normalizeTitle(b).split(" ").filter((w) => w.length > 3));
-  if (!A.size || !B.size) return 0;
+function titleScores(stored: string, candidate: string): { f1: number; precision: number; recall: number } {
+  const A = new Set(normalizeTitle(stored).split(" ").filter((w) => w.length > 3));
+  const B = new Set(normalizeTitle(candidate).split(" ").filter((w) => w.length > 3));
+  if (!A.size || !B.size) return { f1: 0, precision: 0, recall: 0 };
   let hit = 0;
   for (const w of A) if (B.has(w)) hit++;
-  const precision = hit / A.size;
-  const recall = hit / B.size;
-  return precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
+  const precision = hit / A.size;   // how much of what we stored is in the candidate
+  const recall = hit / B.size;      // how much of the candidate we stored
+  const f1 = precision + recall === 0 ? 0 : (2 * precision * recall) / (precision + recall);
+  return { f1, precision, recall };
 }
+
 
 function crossrefAuthors(w: CrossrefWork): string[] {
   return (w.author ?? [])
@@ -1678,46 +1725,77 @@ type Match = {
   authorScore: number;
   /** Title + journal + year all agree: this is the same paper, whoever wrote it. */
   strong: boolean;
+  /** The stored title is a truncation of the candidate's — a subtitle was dropped. */
+  contained: boolean;
   confident: boolean;
 };
+
+/**
+ * One place decides what counts as a match, so the search path and the
+ * known-DOI path cannot drift apart in how strict they are.
+ */
+function scoreMatch(work: CrossrefWork, storedTitle: string, journal: string, year: string, knownAuthors: string[]): Match {
+  const { f1, precision } = titleScores(storedTitle, decodeEntities((work.title ?? [""])[0] ?? ""));
+  const found = crossrefYear(work);
+  // Online-first publication routinely shifts the year by one.
+  const yearMatch = !year || !found || Math.abs(Number(found) - Number(year)) <= 1;
+  const journalMatch =
+    !journal || !(work["container-title"] ?? [])[0] ||
+    normalizeTitle(decodeEntities((work["container-title"] ?? [""])[0] ?? "")) === normalizeTitle(journal);
+  const authorScore = authorAgreement(knownAuthors, crossrefAuthors(work));
+  const isArticle = work.type === "journal-article";
+  // A near-exact match on a long, distinctive title in the same journal and year
+  // identifies the paper on its own. Two different papers do not share a title
+  // like "Spatiotemporally continuous PM2.5 dataset in the Mekong River Basin".
+  const strong = isArticle && f1 >= 0.95 && journalMatch && yearMatch;
+  // Every stored word present, same journal, same year: a dropped subtitle, not
+  // a different paper. Journal and year carry the weight the missing tail can't.
+  const contained = isArticle && precision >= 0.95 && f1 >= 0.6 && journalMatch && yearMatch;
+  return {
+    work,
+    similarity: f1,
+    yearMatch,
+    authorScore,
+    strong,
+    contained,
+    // A preprint (`posted-content`) of the same paper scores 1.0 on title, so
+    // the type check is doing real work, not ceremony. Author agreement guards
+    // the weaker band, where a review and its subject can look alike.
+    confident: strong || contained || (isArticle && f1 >= 0.85 && yearMatch && authorScore >= 0.5),
+  };
+}
+
+/**
+ * Fetch one known DOI and score it like any search hit. Sometimes you already
+ * know the DOI and Crossref's bibliographic search simply cannot find the paper
+ * from its title — but "I know it" is still not evidence, so the record is
+ * fetched and checked against the card rather than taken on trust.
+ */
+async function crossrefByDoi(doi: string, title: string, journal: string, year: string, knownAuthors: string[]): Promise<Match | null> {
+  const res = await fetch(`${CROSSREF_API}/${encodeURIComponent(doi)}?mailto=${encodeURIComponent(CROSSREF_MAILTO)}`, {
+    signal: AbortSignal.timeout(20000),
+  });
+  if (!res.ok) return null;
+  const json = (await res.json()) as { status?: string; message?: CrossrefWork };
+  const work = json.status === "ok" ? json.message : undefined;
+  if (!work) return null;
+  return scoreMatch(work, title, journal, year, knownAuthors);
+}
 
 async function crossrefSearch(title: string, journal: string, year: string, knownAuthors: string[] = []): Promise<Match[]> {
   const url = new URL(CROSSREF_API);
   url.searchParams.set("query.bibliographic", [title, journal, year].filter(Boolean).join(" "));
   url.searchParams.set("rows", "5");
-  url.searchParams.set("select", "DOI,title,container-title,type,issued,volume,page,article-number,author");
+  url.searchParams.set("select", "DOI,title,container-title,type,issued,volume,issue,page,article-number,author");
   url.searchParams.set("mailto", CROSSREF_MAILTO);
 
   const res = await fetch(url, { signal: AbortSignal.timeout(20000) });
   if (!res.ok) throw new Error(`Crossref ${res.status}`);
   const json = (await res.json()) as { message?: { items?: CrossrefWork[] } };
 
-  return (json.message?.items ?? []).map((work) => {
-    const similarity = titleSimilarity(title, (work.title ?? [""])[0] ?? "");
-    const found = crossrefYear(work);
-    // Online-first publication routinely shifts the year by one.
-    const yearMatch = !year || !found || Math.abs(Number(found) - Number(year)) <= 1;
-    const authorScore = authorAgreement(knownAuthors, crossrefAuthors(work));
-    const journalMatch =
-      !journal || !(work["container-title"] ?? [])[0] ||
-      normalizeTitle(decodeEntities((work["container-title"] ?? [""])[0] ?? "")) === normalizeTitle(journal);
-    // A near-exact match on a long, distinctive title in the same journal and year
-    // identifies the paper on its own. Two different papers do not share a title
-    // like "Spatiotemporally continuous PM2.5 dataset in the Mekong River Basin".
-    const strong = work.type === "journal-article" && similarity >= 0.95 && journalMatch && yearMatch;
-    return {
-      work,
-      similarity,
-      yearMatch,
-      authorScore,
-      strong,
-      // A preprint (`posted-content`) of the same paper scores 1.0 on title, so
-      // the type check is doing real work, not ceremony. Author agreement guards
-      // the weaker band, where a review and its subject can look alike.
-      confident:
-        strong || (work.type === "journal-article" && similarity >= 0.85 && yearMatch && authorScore >= 0.5),
-    };
-  }).sort((a, b) => b.similarity - a.similarity);
+  return (json.message?.items ?? [])
+    .map((work) => scoreMatch(work, title, journal, year, knownAuthors))
+    .sort((a, b) => b.similarity - a.similarity);
 }
 
 type RawCard = { path: string; name: string; text: string; fm: Record<string, string | string[]> };
@@ -1814,7 +1892,20 @@ async function cmdDoi(rest: string[]): Promise<PluginResult> {
   const all = rest.includes("--all");
   const rekey = rest.includes("--rekey");
   const keepAuthors = rest.includes("--keep-authors");
-  const only = new Set(rest.filter((a) => !a.startsWith("--")));
+  const doiFlag = rest.indexOf("--doi");
+  const givenDoi = doiFlag >= 0 ? rest[doiFlag + 1] : undefined;
+  // Escape hatch for the case where the DOI is known-good and the *stored title*
+  // is what's wrong — a fabricated title reached one card, and no similarity
+  // threshold can tell "our title is wrong" from "wrong paper". Deliberately
+  // narrow: one named card, an explicit DOI, and an explicit assertion of trust.
+  const trustDoi = rest.includes("--trust-doi");
+  const only = new Set(rest.filter((a, i) => !a.startsWith("--") && i !== doiFlag + 1));
+  if (givenDoi && only.size !== 1) {
+    return { ok: false, error: "--doi applies to exactly one card: citation doi <citekey> --doi 10.xxxx/yyy --write" };
+  }
+  if (trustDoi && !givenDoi) {
+    return { ok: false, error: "--trust-doi only means anything with an explicit --doi to trust" };
+  }
 
   const cards = await readRawCards();
   if (!cards.length) return { ok: false, error: `no cards in ${PAPERS_DIR} — run "citation cards" first` };
@@ -1844,16 +1935,33 @@ async function cmdDoi(rest: string[]): Promise<PluginResult> {
     const year = str(card.fm, "year");
 
     const knownAuthors = Array.isArray(card.fm.authors) ? (card.fm.authors as string[]) : [];
+    // Some cards store the issue inside the volume, APA-style: "11(23)". BibTeX
+    // wants them apart (volume/number), so split before Crossref's values land.
+    const storedVolume = (() => {
+      const raw = str(card.fm, "volume");
+      const m = raw.match(/^\s*([^\s(]+)\s*\(\s*([^)]+)\s*\)\s*$/);
+      return m ? { volume: m[1], issue: m[2] } : { volume: raw, issue: str(card.fm, "issue") };
+    })();
     let matches: Match[];
     try {
-      matches = await crossrefSearch(title, journal, year, knownAuthors);
+      matches = givenDoi
+        ? [await crossrefByDoi(givenDoi, title, journal, year, knownAuthors)].filter((m): m is Match => m !== null)
+        : await crossrefSearch(title, journal, year, knownAuthors);
     } catch (error) {
       lines.push(`  ✗ ${citekey} — Crossref unreachable: ${error instanceof Error ? error.message : String(error)}`);
       failed++;
       continue;
     }
 
-    const best = matches.find((m) => m.confident);
+    const best = matches.find((m) => m.confident) ?? (trustDoi ? matches[0] : undefined);
+    if (best && trustDoi && !best.confident) {
+      lines.push(
+        `  ! ${citekey} — accepting ${best.work.DOI} on trust despite title similarity ${best.similarity.toFixed(2)}`,
+        `      stored title  : ${title}`,
+        `      Crossref title: ${decodeEntities(((best.work.title ?? [""])[0] ?? "").replace(/<[^>]+>/g, ""))}`,
+        `      → the stored title is being REPLACED. If the DOI is wrong, this writes a wrong citation.`,
+      );
+    }
     if (!best) {
       const top = matches[0];
       const why = !top
@@ -1886,14 +1994,31 @@ async function cmdDoi(rest: string[]): Promise<PluginResult> {
     // publisher's own registered metadata, so on a strong match it wins — but the
     // old list is preserved, never erased, and the swap is always announced.
     const disputed = knownAuthors.length > 0 && best.authorScore < 0.5 && best.strong;
-    const takeAuthors = !knownAuthors.length || (disputed && !keepAuthors);
+    // "Bainomugisha, E., et al." is not an author list, it is a list with a hole
+    // in it — and BibTeX has no idea what "et al." means, so it would render as a
+    // person's name. Crossref carries the complete list; prefer it.
+    const truncated = knownAuthors.some((a) => /\bet\s+al\.?\s*$/i.test(a));
+    // Silent omission: every stored author appears in Crossref's list, but the
+    // list is shorter. Nothing disagrees — a co-author was simply dropped when
+    // the reference was typed, with no "et al." to admit it. she2019 lost its
+    // fifth author that way, which is a small citation error that still misstates
+    // who did the work.
+    const incomplete = knownAuthors.length > 0 && best.authorScore === 1 && authors.length > knownAuthors.length;
+    const sameWork = best.strong || best.contained || trustDoi;
+    const takeAuthors =
+      !knownAuthors.length || (!keepAuthors && (disputed || ((truncated || incomplete) && sameWork)));
 
-    lines.push(`  ✓ ${citekey} [${best.similarity.toFixed(2)}]${best.strong && best.authorScore < 1 ? " strong" : ""} ${w.DOI}`);
+    if (best.contained && !best.strong) notes.push(`title was truncated upstream → "${crTitle.slice(0, 78)}${crTitle.length > 78 ? "…" : ""}"`);
+    lines.push(`  ✓ ${citekey} [${best.similarity.toFixed(2)}]${best.strong && best.authorScore < 1 ? " strong" : best.contained && !best.strong ? " contained" : ""} ${w.DOI}`);
     lines.push(`      ${authors.slice(0, 3).join("; ")}${authors.length > 3 ? ` … +${authors.length - 3}` : ""} (${crossrefYear(w)})`);
     if (disputed) {
       lines.push(`      ⚠ AUTHORS CORRECTED — upstream said "${knownAuthors[0]}", Crossref says "${authors[0]}"`);
       lines.push(`        upstream list kept in authors_upstream:${keepAuthors ? " (not replaced: --keep-authors)" : ""}`);
       disputedAuthors.push(citekey);
+    } else if (takeAuthors && knownAuthors.length) {
+      lines.push(
+        `      ↳ author list completed: ${knownAuthors.length}${truncated ? ` ("et al.")` : " (silently short)"} → ${authors.length} named`,
+      );
     }
     for (const n of notes) lines.push(`      ↳ ${n}`);
     resolved++;
@@ -1905,7 +2030,8 @@ async function cmdDoi(rest: string[]): Promise<PluginResult> {
       status: "ok",
       title: crTitle,
       journal: crJournal || journal,
-      volume: w.volume ?? str(card.fm, "volume"),
+      volume: w.volume ?? storedVolume.volume,
+      issue: w.issue ?? storedVolume.issue,
       pages: crPages || str(card.fm, "pages"),
       verified: `crossref ${new Date().toISOString().slice(0, 10)}`,
     };
@@ -1931,8 +2057,12 @@ async function cmdDoi(rest: string[]): Promise<PluginResult> {
     // The old key is kept in `aka:` — nothing is deleted, and `cards` reads it
     // back so regeneration never resurrects the placeholder.
     let path = card.path;
-    if (rekey && authors.length) {
-      const proposed = citekeyFor(authors, crossrefYear(w) || year, crJournal, citekey);
+    // Key off the authors that actually end up in the card. Keying off Crossref's
+    // list while keeping the card's produced `adong2025.md` whose first author
+    // reads "Bainomugisha" — a filename contradicting its own contents.
+    const finalAuthors = takeAuthors ? authors : knownAuthors;
+    if (rekey && finalAuthors.length) {
+      const proposed = citekeyFor(finalAuthors, crossrefYear(w) || year, crJournal, citekey);
       if (proposed !== citekey && !takenKeys.has(proposed)) {
         takenKeys.add(proposed);
         next = patchFrontmatter(next, { citekey: proposed, aka: citekey });
@@ -1967,6 +2097,22 @@ async function cmdDoi(rest: string[]): Promise<PluginResult> {
 // can actually use. Entries missing authors or a DOI are NOT silently dropped —
 // they are written as commented-out stubs, so the bibliography stays honest
 // about what it does not yet have, and nothing disappears from the corpus.
+
+/**
+ * BibTeX has no concept of "et al." — it would typeset it as somebody's name.
+ * `others` is the convention it does understand, and styles render it as "et al."
+ * themselves. Truncation that could not be resolved stays visible as truncation.
+ */
+function bibAuthors(authors: string[]): string {
+  const named: string[] = [];
+  let truncated = false;
+  for (const a of authors) {
+    const cleaned = a.replace(/,?\s*\bet\s+al\.?\s*$/i, "").trim();
+    if (cleaned !== a.trim()) truncated = true;
+    if (cleaned) named.push(bibEscape(cleaned));
+  }
+  return [...named, ...(truncated ? ["others"] : [])].join(" and ");
+}
 
 /** BibTeX's escapes. Titles keep their braces so styles cannot lowercase them. */
 function bibEscape(s: string): string {
@@ -2015,11 +2161,12 @@ async function cmdBib(rest: string[]): Promise<PluginResult> {
     if (!doi) missing.push("doi");
 
     const fields: Array<[string, string]> = [
-      ["author", authors.map(bibEscape).join(" and ")],
+      ["author", bibAuthors(authors)],
       ["title", `{${bibEscape(title)}}`],   // inner braces protect capitalisation
       ["journal", bibEscape(journal)],
       ["year", year],
       ["volume", str(fm, "volume")],
+      ["number", str(fm, "issue")],
       ["pages", str(fm, "pages")],
       ["doi", doi],
       ["note", str(fm, "verified") ? `verified via ${str(fm, "verified")}` : ""],

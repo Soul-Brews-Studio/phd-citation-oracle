@@ -6,16 +6,24 @@ short_title: "Biomass Burning Review, Thailand"
 authors:
   - "Suriyawong, P."
   - "Chuetor, S."
-  - "Samae, H., et al."
+  - "Samae, H."
+  - "Piriyakarnsakul, S."
+  - "Amin, M."
+  - "Furuuchi, M."
+  - "Hata, M."
+  - "Inerb, M."
+  - "Phairuang, W."
 year: "2023"
 journal: "Heliyon"
 quartile: "Q1"
 impact_factor: ""
 volume: "9"
-pages: ""
-doi: ""
+issue: "3"
+pages: "e14261"
+doi: "10.1016/j.heliyon.2023.e14261"
 topic: "thailand-burning-season"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, thailand-burning-season]
 kind: paper
 ---

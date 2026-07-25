@@ -4,21 +4,31 @@ id: "2.2.5"
 title: "Calibrating networks of low-cost air quality sensors"
 short_title: "Network-Level Calibration"
 authors:
-  - "deSouza, P., et al."
+  - "deSouza, P."
+  - "Kahn, R."
+  - "Stockman, T."
+  - "Obermann, W."
+  - "Crawford, B."
+  - "Wang, A."
+  - "Crooks, J."
+  - "Li, J."
+  - "Kinney, P."
 year: "2022"
 journal: "Atmospheric Measurement Techniques"
 quartile: "Q1"
 impact_factor: "4.0"
 volume: "15"
+issue: "21"
 pages: "6309-6328"
-doi: ""
+doi: "10.5194/amt-15-6309-2022"
 topic: "reference-monitoring-bam"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, reference-monitoring-bam]
 kind: paper
 ---
 
-# deSouza (2022) — Network-Level Calibration
+# deSouza et al. (2022) — Network-Level Calibration
 
 **Key findings** — Full-period models more accurate but impractical for continuous recalibration. On-the-fly corrections capture short-term drift.
 

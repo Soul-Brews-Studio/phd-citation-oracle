@@ -1,7 +1,7 @@
 ---
 citekey: barkjohn2025
 id: "2.2.1"
-title: "Evaluation of long-term performance of six PM2.5 sensor types"
+title: "Evaluation of Long-Term Performance of Six PM2.5 Sensor Types"
 short_title: "Long-Term Evaluation of Six Sensor Types"
 authors:
   - "Barkjohn, K. K."
@@ -15,10 +15,12 @@ journal: "Sensors"
 quartile: "Q2"
 impact_factor: "3.9"
 volume: "25"
+issue: "4"
 pages: "1265"
-doi: ""
+doi: "10.3390/s25041265"
 topic: "reference-monitoring-bam"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, reference-monitoring-bam]
 kind: paper
 ---

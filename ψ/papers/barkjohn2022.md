@@ -1,7 +1,7 @@
 ---
 citekey: barkjohn2022
 id: "2.1.3"
-title: "Correction and accuracy of PurpleAir PM2.5 measurements for extreme wildfire smoke"
+title: "Correction and Accuracy of PurpleAir PM2.5 Measurements for Extreme Wildfire Smoke"
 short_title: "Extreme Wildfire Smoke Correction"
 authors:
   - "Barkjohn, K. K."
@@ -13,10 +13,12 @@ journal: "Sensors"
 quartile: "Q2"
 impact_factor: "3.9"
 volume: "22"
+issue: "24"
 pages: "9669"
-doi: ""
+doi: "10.3390/s22249669"
 topic: "low-cost-sensor-calibration"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, low-cost-sensor-calibration]
 kind: paper
 ---

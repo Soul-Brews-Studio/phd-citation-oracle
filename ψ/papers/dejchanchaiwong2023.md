@@ -1,7 +1,7 @@
 ---
 citekey: dejchanchaiwong2023
 id: "2.1.10"
-title: "Seasonal field calibration of low-cost PM2.5 sensors in different locations with different sources in Thailand"
+title: "Seasonal Field Calibration of Low-Cost PM2.5 Sensors in Different Locations with Different Sources in Thailand"
 short_title: "Seasonal Calibration in Thailand"
 authors:
   - "Dejchanchaiwong, R."
@@ -17,10 +17,12 @@ journal: "Atmosphere"
 quartile: "Q2"
 impact_factor: "2.9"
 volume: "14"
+issue: "3"
 pages: "496"
-doi: ""
+doi: "10.3390/atmos14030496"
 topic: "low-cost-sensor-calibration"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, low-cost-sensor-calibration]
 kind: paper
 ---

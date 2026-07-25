@@ -4,21 +4,31 @@ id: "2.1.7"
 title: "Characterisation and calibration of low-cost PM sensors at high temporal resolution to reference-grade performance"
 short_title: "Reference-Grade from Low-Cost Sensors"
 authors:
-  - "Bulot, F. M. J., et al."
+  - "Bulot, F. M. J."
+  - "Ossont, S. J."
+  - "Morris, A. K. R."
+  - "Basford, P. J."
+  - "Easton, N. H. C."
+  - "Mitchell, H. L."
+  - "Foster, G. L."
+  - "Cox, S. J."
+  - "Loxham, M."
 year: "2023"
 journal: "Heliyon"
 quartile: "Q1"
 impact_factor: "4.0"
 volume: "9"
-pages: ""
-doi: ""
+issue: "5"
+pages: "e15943"
+doi: "10.1016/j.heliyon.2023.e15943"
 topic: "low-cost-sensor-calibration"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, low-cost-sensor-calibration]
 kind: paper
 ---
 
-# Bulot (2023) — Reference-Grade from Low-Cost Sensors
+# Bulot et al. (2023) — Reference-Grade from Low-Cost Sensors
 
 **Key findings** — PMS5003 calibrated RMSE down to 3.0-3.1 ug/m3. Between-unit uncertainty ~1.1-1.2 ug/m3. Twice-yearly calibration recommended.
 

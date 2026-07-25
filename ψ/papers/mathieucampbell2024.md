@@ -13,10 +13,12 @@ journal: "Atmospheric Measurement Techniques"
 quartile: "Q1"
 impact_factor: "4.0"
 volume: "17"
+issue: "22"
 pages: "6735-6749"
-doi: ""
+doi: "10.5194/amt-17-6735-2024"
 topic: "low-cost-sensor-calibration"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, low-cost-sensor-calibration]
 kind: paper
 ---

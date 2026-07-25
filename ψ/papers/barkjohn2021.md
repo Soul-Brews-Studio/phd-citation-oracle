@@ -1,7 +1,7 @@
 ---
 citekey: barkjohn2021
 id: "2.1.1"
-title: "Development and application of a United States-wide correction for PM2.5 data collected with the PurpleAir sensor"
+title: "Development and application of a United States-wide correction for PM 2.5 data collected with the PurpleAir sensor"
 short_title: "US-wide PurpleAir Correction"
 authors:
   - "Barkjohn, K. K."
@@ -12,10 +12,12 @@ journal: "Atmospheric Measurement Techniques"
 quartile: "Q1"
 impact_factor: "4.0"
 volume: "14"
+issue: "6"
 pages: "4617-4637"
-doi: ""
+doi: "10.5194/amt-14-4617-2021"
 topic: "low-cost-sensor-calibration"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, low-cost-sensor-calibration]
 kind: paper
 ---

@@ -1,7 +1,7 @@
 ---
 citekey: patel2024
 id: "2.1.9"
-title: "Towards a hygroscopic growth calibration for low-cost PM2.5 sensors"
+title: "Towards a hygroscopic growth calibration for low-cost PM 2.5 sensors"
 short_title: "Hygroscopic Growth Calibration"
 authors:
   - "Patel, M. Y."
@@ -14,10 +14,12 @@ journal: "Atmospheric Measurement Techniques"
 quartile: "Q1"
 impact_factor: "4.0"
 volume: "17"
+issue: "3"
 pages: "1051-1060"
-doi: ""
+doi: "10.5194/amt-17-1051-2024"
 topic: "low-cost-sensor-calibration"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, low-cost-sensor-calibration]
 kind: paper
 ---

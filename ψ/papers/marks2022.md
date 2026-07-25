@@ -11,10 +11,12 @@ journal: "Environmental Policy and Governance"
 quartile: "Q1"
 impact_factor: "4.3"
 volume: "32"
+issue: "4"
 pages: "305-319"
-doi: ""
+doi: "10.1002/eet.1976"
 topic: "health-policy"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, health-policy]
 kind: paper
 ---

@@ -11,13 +11,15 @@ year: "2025"
 journal: "Atmosphere"
 quartile: "Q2"
 impact_factor: ""
-volume: "16(11)"
+volume: "16"
 pages: "1304"
 doi: "10.3390/atmos16111304"
 topic: "multi-source-fusion-qa"
 status: ok
 tags: [paper, multi-source-fusion-qa, imported-2026-07-25]
 kind: paper
+verified: "crossref 2026-07-25"
+issue: "11"
 ---
 
 # Chimla et al. (2025) — WRF-Chem + Satellite + Ground Fusion, Thailand

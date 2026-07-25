@@ -14,10 +14,12 @@ journal: "Atmospheric Measurement Techniques"
 quartile: "Q1"
 impact_factor: "4.0"
 volume: "16"
+issue: "1"
 pages: "169-179"
-doi: ""
+doi: "10.5194/amt-16-169-2023"
 topic: "reference-monitoring-bam"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, reference-monitoring-bam]
 kind: paper
 ---

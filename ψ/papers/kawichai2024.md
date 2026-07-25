@@ -1,7 +1,7 @@
 ---
 citekey: kawichai2024
 id: "2.5.7"
-title: "Characteristics of carbonaceous species of PM2.5 in Chiang Mai City, Thailand"
+title: "Characteristics of Carbonaceous Species of PM2.5 in Chiang Mai City, Thailand"
 short_title: "Carbonaceous Species, Chiang Mai"
 authors:
   - "Kawichai, S."
@@ -14,10 +14,12 @@ journal: "Aerosol and Air Quality Research"
 quartile: "Q2"
 impact_factor: ""
 volume: "24"
+issue: "4"
 pages: "230269"
-doi: ""
+doi: "10.4209/aaqr.230269"
 topic: "thailand-burning-season"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, thailand-burning-season]
 kind: paper
 ---

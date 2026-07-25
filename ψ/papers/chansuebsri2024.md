@@ -6,16 +6,23 @@ short_title: "PM2.5 Source Apportionment, Chiang Mai"
 authors:
   - "Chansuebsri, S."
   - "Kolar, P."
-  - "Kraisitnitikul, P., et al."
+  - "Kraisitnitikul, P."
+  - "Kantarawilawan, N."
+  - "Yabueng, N."
+  - "Wiriya, W."
+  - "Thepnuan, D."
+  - "Chantara, S."
 year: "2024"
 journal: "Atmospheric Environment"
 quartile: "Q1"
 impact_factor: "5.0"
 volume: "327"
+issue: ""
 pages: "120517"
-doi: ""
+doi: "10.1016/j.atmosenv.2024.120517"
 topic: "thailand-burning-season"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, thailand-burning-season]
 kind: paper
 ---

@@ -1,7 +1,7 @@
 ---
 citekey: inlaung2024
 id: "2.5.3"
-title: "Assessment of transboundary PM2.5 from biomass burning in Northern Thailand using the WRF-Chem model"
+title: "Assessment of Transboundary PM2.5 from Biomass Burning in Northern Thailand Using the WRF-Chem Model"
 short_title: "WRF-Chem Transboundary PM2.5"
 authors:
   - "Inlaung, K."
@@ -13,10 +13,12 @@ journal: "Toxics"
 quartile: "Q1"
 impact_factor: "4.0"
 volume: "12"
+issue: "7"
 pages: "462"
-doi: ""
+doi: "10.3390/toxics12070462"
 topic: "thailand-burning-season"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, thailand-burning-season]
 kind: paper
 ---

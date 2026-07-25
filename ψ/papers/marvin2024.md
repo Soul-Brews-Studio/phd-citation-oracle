@@ -14,10 +14,12 @@ journal: "Atmospheric Chemistry and Physics"
 quartile: "Q1"
 impact_factor: "6.3"
 volume: "24"
+issue: "6"
 pages: "3699-3715"
-doi: ""
+doi: "10.5194/acp-24-3699-2024"
 topic: "health-policy"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, health-policy]
 kind: paper
 ---

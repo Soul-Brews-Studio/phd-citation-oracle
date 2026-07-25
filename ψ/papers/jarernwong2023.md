@@ -1,7 +1,7 @@
 ---
 citekey: jarernwong2023
 id: "2.6.1"
-title: "Health impact related to ambient particulate matter exposure as a spatial health risk map case study in Chiang Mai, Thailand"
+title: "Health Impact Related to Ambient Particulate Matter Exposure as a Spatial Health Risk Map Case Study in Chiang Mai, Thailand"
 short_title: "Health Risk Map, DustBoy Data"
 authors:
   - "Jarernwong, K."
@@ -12,10 +12,12 @@ journal: "Atmosphere"
 quartile: "Q2"
 impact_factor: ""
 volume: "14"
+issue: "2"
 pages: "261"
-doi: ""
+doi: "10.3390/atmos14020261"
 topic: "health-policy"
 status: ok
+verified: "crossref 2026-07-25"
 tags: [paper, health-policy]
 kind: paper
 ---
