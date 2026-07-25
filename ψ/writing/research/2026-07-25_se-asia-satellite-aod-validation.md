@@ -235,3 +235,59 @@ By recognizing these fundamental gaps—and acknowledging the severe mathematica
 > 27. The Mineral Aerosol Profiling from Infrared Radiances version 5.1 algorithm and its evaluation \- EGUsphere, [https://egusphere.copernicus.org/preprints/2026/egusphere-2026-924/egusphere-2026-924.pdf](https://egusphere.copernicus.org/preprints/2026/egusphere-2026-924/egusphere-2026-924.pdf)  
 > 28. (PDF) The Mineral Aerosol Profiling from Infrared Radiances version 5.1 algorithm and its evaluation \- ResearchGate, [https://www.researchgate.net/publication/401555157\_The\_Mineral\_Aerosol\_Profiling\_from\_Infrared\_Radiances\_version\_51\_algorithm\_and\_its\_evaluation](https://www.researchgate.net/publication/401555157_The_Mineral_Aerosol_Profiling_from_Infrared_Radiances_version_51_algorithm_and_its_evaluation)  
 > 29. Distribution and Meteorological Control of PM2.5 and Its Effect on Visibility in Northern Thailand \- MDPI, [https://www.mdpi.com/2073-4433/14/3/538](https://www.mdpi.com/2073-4433/14/3/538)
+---
+
+## Review
+
+*Appended by Citation Oracle on 2026-07-25 during ingest. Nothing above this line was edited.*
+
+### DOI verification — all supplied DOIs checked against Crossref
+
+| DOI | Verdict |
+|---|---|
+| `10.1007/s44408-025-00030-0` (Jang et al. 2025) | ✅ confirmed — title, authors, journal, year all match |
+| `10.5194/amt-18-1471-2025` (O et al. 2025) | ✅ confirmed |
+| `10.2306/scienceasia1513-1874.2022.001` (Nakapan & Hongthong 2022) | ✅ confirmed |
+| `10.4209/aaqr.2020.05.0257` (Bai et al.) | ✅ confirmed — Crossref issues it as **2021**, not 2020 |
+
+Four further papers were cited without DOIs; all four were resolved and confirmed:
+`10.5194/amt-12-4619-2019` (Choi), `10.1016/j.rse.2015.03.005` (Meng),
+`10.3390/rs11232771` (She), `10.3390/atmos16111304` (Chimla).
+
+### ⚠️ One citation in this report is wrong
+
+The Himawari-8 MAIAC entry is attributed to **"Chen, X. et al. — Validation of GeoNEX Himawari-8
+MAIAC Aerosol Optical Depth"**. No such paper was found. Crossref resolves the described work to:
+
+> She, L., Zhang, H., Wang, W., & Wang, Y. (2019). *Evaluation of the Multi-Angle Implementation
+> of Atmospheric Correction (MAIAC) Aerosol Algorithm for Himawari-8 Data.* Remote Sensing,
+> 11(23), 2771. DOI: 10.3390/rs11232771
+
+**Both the author and the title were incorrect** in this report. The card is filed as `she2019`.
+Treat other uncited author attributions here with corresponding caution.
+
+### Also corrected
+
+The Bai et al. entry is flagged "[Already Catalogued — LGHAP Foundation]", but it is **not**
+either LGHAP card (`bai2022` = LGHAP v1, `bai2024` = LGHAP v2). It is a separate paper and was
+filed as a new card, `bai2021`. Accepting the report's own catalogued-marker would have written
+a wrong DOI onto an existing card.
+
+### Held — not written into any card
+
+- **Kim et al. (2020)** and **Cho et al. (2024)** — mentioned only in a parenthetical, with no
+  title, journal or DOI. Almost certainly the existing `kim2020` and `cho2024` cards, but the
+  evidence here is too thin to enrich them. Also note the `[Already Catalogued]` marker on that
+  line sits after Cho while grammatically covering both — genuinely ambiguous.
+- **Sentinel-5P TROPOMI** — the subsection records an *absence*, not a paper. Nothing citable.
+
+### Cards written
+
+Enriched: `jang2025`, `o2025` (DOIs + validation detail).
+Created: `nakapan2022`, `bai2021`, `choi2019`, `meng2015`, `she2019`, `chimla2025`.
+
+### Not yet harvested
+
+The report's **Comparative Synthesis Table**, its three **Disagreements** sections, its
+**Unverified Claims** and its three **Critical Gaps** have been read but not converted into
+work products. That is `/research-harvest`'s job.

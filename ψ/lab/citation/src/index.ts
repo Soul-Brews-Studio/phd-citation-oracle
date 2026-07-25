@@ -510,7 +510,11 @@ async function readPaperCards(): Promise<Array<Paper & { citekey: string; notes:
   const dir = join(repoRoot(), PAPERS_DIR);
   let names: string[] = [];
   try {
-    names = (await readdir(dir)).filter((n) => n.endsWith(".md") && n !== "INDEX.md");
+    // Skip the generated contents page and the hand-written manual — they live
+    // in the same directory but are not papers (README.md was silently indexing
+    // as one "uncategorized" paper).
+    const NOT_CARDS = new Set(["INDEX.md", "README.md"]);
+    names = (await readdir(dir)).filter((n) => n.endsWith(".md") && !NOT_CARDS.has(n));
   } catch {
     return [];
   }
