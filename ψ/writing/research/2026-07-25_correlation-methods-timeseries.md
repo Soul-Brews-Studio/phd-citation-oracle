@@ -172,9 +172,46 @@ Two corrections to how this was written before, both material:
 - ✅ **RESOLVED 2026-07-25** — EU Annex I §A verified on EUR-Lex (CELEX:32008L0050):
   PM10/PM2.5 fixed **25%**, indicative **50%**, data capture **90%**, indicative time
   coverage **14%**. See §4.
-- ⚠️ **CCC, Bland–Altman LoA and Deming slope cannot be computed from r/bias/RMSE alone** —
-  they need each series' standard deviation or the raw paired data. Get the paired data
-  from the parent oracle (`artifacts/comparison/multi_source_comparison_overall.csv`).
+- ✅ **PARTLY RESOLVED 2026-07-25 — Bland–Altman IS computable; CCC and Deming are not.**
+  The parent's data exists, as `artifacts/comparison/multi_source_comparison.parquet` (not the
+  `.csv` this note originally guessed) — 141 rows, 33 columns, 138 pairs with usable stats. It has
+  `n`, `pearson_corr`, `bias_me`, `rmse`, `mae` and both means, but **no standard deviations**.
+
+  That blocks CCC and Deming, which need σx and σy *separately* — one equation in two unknowns.
+  But **Bland–Altman does not need them.** It needs the SD of the *differences*, and that is
+  recoverable exactly from what's here:
+
+  ```
+  RMSE² = (1/n)·Σd²   and   bias = d̄          (d = estimate − reference)
+  ⇒ population var(d) = RMSE² − bias²
+  ⇒ sample SD(d) = √( n/(n−1) · (RMSE² − bias²) )
+  ⇒ 95% LoA = bias ± 1.96·SD(d)
+  ```
+
+  Computed over the parent's 46 collocated BAM↔DustBoy pairs:
+
+  | Comparison | median 95% LoA width | median bias | pairs |
+  |---|---:|---:|---:|
+  | **DustBoy PM2.5 daily mean vs BAM** | **87.7 µg/m³** | +20.5 | 46 |
+  | GEMS AOD@443 × 178 vs BAM | 247.7 µg/m³ | +86.4 | 46 |
+  | GEMS AOD@443 × 72 vs BAM | 89.1 µg/m³ | −4.4 | 46 |
+
+  **This is the number the thesis actually needs, and it makes §1's argument concrete.** The
+  best-correlated pairs are *not* the best-agreeing ones: `70t↔NC-175` has r = 0.986 yet LoA
+  [−22.3, +9.9] µg/m³, and `35t↔N-131` has r = 0.974 with LoA [−8.3, +33.1]. A median LoA width of
+  87.7 µg/m³ means a DustBoy reading can sit ±44 µg/m³ from the reference while correlation still
+  looks excellent — which spans several AQI bands. Report LoA next to r, never r alone.
+
+  ⚠️ Three caveats before this goes in the thesis: (1) `n` per pair is small (4–11 days), so the
+  LoA are themselves wide-CI estimates — quote n beside every interval; (2) 3 of 141 rows were
+  skipped because |bias| ≥ RMSE, which means those two statistics were not computed over the same
+  paired set — worth asking the parent about; (3) Bland–Altman assumes differences are roughly
+  normal and bias is constant across the range, and a proportional bias (likely under heavy smoke)
+  breaks that — plot d against the mean before trusting a single LoA.
+
+- ⚠️ **Still blocked: Lin's CCC and Deming regression.** Both need σx and σy individually, or the
+  raw paired series. Ask the parent for per-pair standard deviations — a one-column addition to
+  that parquet would unblock both.
 
 ---
 
