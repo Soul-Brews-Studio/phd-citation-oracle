@@ -1925,7 +1925,14 @@ function refreshCardBody(text: string, authors: string[], year: string, journal:
     // Only overwrite the placeholder — a hand-written citation is human work.
     // The exception is a corrected byline: leaving the old reference line would
     // make the card contradict its own frontmatter, which is worse than either.
-    forceCitation || /^\[Authors?\]/i.test(existing.trim()) || !existing.trim()
+    // Replace when it is a placeholder OR when it simply does not name the first
+    // author we just verified — a line reading "_pending Crossref_" on a card whose
+    // frontmatter says Nan, F. is a card contradicting itself.
+    forceCitation ||
+    !existing.trim() ||
+    /^\[Authors?\]/i.test(existing.trim()) ||
+    /^_+.*_+$/.test(existing.trim()) ||
+    (authors.length > 0 && !existing.includes(authors[0]!.split(",")[0]!.trim()))
       ? `${prefix}${citation}`
       : `${prefix}${existing}`);
   return out;
@@ -1943,7 +1950,11 @@ async function cmdDoi(rest: string[]): Promise<PluginResult> {
   // threshold can tell "our title is wrong" from "wrong paper". Deliberately
   // narrow: one named card, an explicit DOI, and an explicit assertion of trust.
   const trustDoi = rest.includes("--trust-doi");
-  const only = new Set(rest.filter((a, i) => !a.startsWith("--") && i !== doiFlag + 1));
+  // Guard doiFlag < 0: with no --doi flag, doiFlag is -1 and "i !== doiFlag + 1"
+  // silently excluded index 0 — i.e. the first citekey the user typed. Naming one
+  // card therefore fell back to sweeping every unresolved card instead.
+  const doiValueIndex = doiFlag >= 0 ? doiFlag + 1 : -1;
+  const only = new Set(rest.filter((a, i) => !a.startsWith("--") && i !== doiValueIndex));
   if (givenDoi && only.size !== 1) {
     return { ok: false, error: "--doi applies to exactly one card: citation doi <citekey> --doi 10.xxxx/yyy --write" };
   }
