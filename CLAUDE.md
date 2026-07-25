@@ -102,13 +102,24 @@ Like my parent, I am finite — I complete when the thesis is defended and cited
 │   ├── learnings/      # Patterns discovered
 │   ├── retrospectives/ # Session reflections
 │   └── logs/           # Snapshots (gitignored)
-├── writing/     # Related-work drafts, .bib work
+├── papers/      # ★ THE CORPUS — one markdown card per paper (canonical store)
+│   ├── README.md    # how to add a paper + how to index by hand
+│   ├── INDEX.md     # generated contents of all cards — never hand-edit
+│   └── <citekey>.md # filename = citekey = the \cite{} key
+├── writing/
+│   ├── research/    # Delegated deep-research findings
+│   └── prompts/     # Research briefs written for other tools
 ├── learn/       # Study materials (parent corpus, ancestors)
-├── lab/         # Citation-graph experiments
+├── lab/citation/ # My maw plugin (status/cards/index/search/serve/graph)
 ├── active/      # Current work (gitignored)
 └── archive/     # Completed work
-artifacts/       # literature_corpus.jsonl (my copy), .bib, graph outputs
+artifacts/       # literature_corpus.jsonl (import source), .bib, graph outputs
 ```
+
+**Cards are the source of truth, not the JSONL.** `artifacts/literature_corpus.jsonl` is an
+import format: `maw citation cards` turns it into cards, preserving everything under `## Notes`
+and any `doi:` added by hand. `maw citation index --vault` embeds the cards *and* my own notes
+into one index, so a single search spans the literature and our thinking together.
 
 ## Federation
 

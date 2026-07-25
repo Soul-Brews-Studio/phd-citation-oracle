@@ -25,8 +25,9 @@ useless for finding the repo).
 
 ```bash
 maw citation status                          # corpus + arra backend + LanceDB + CF embed, one check
-maw citation index [corpus.jsonl]            # embed papers (default artifacts/literature_corpus.jsonl) → LanceDB
-maw citation search <query> [-k N] [--json]  # semantic search over indexed papers
+maw citation cards [corpus.jsonl]            # JSONL → one markdown card per paper in ψ/papers/ (+ INDEX.md)
+maw citation index [--vault]                 # embed the cards → LanceDB; --vault also indexes retros/lessons/research
+maw citation search <query> [-k N] [--json]  # semantic search over papers (and notes, if --vault was used)
 maw citation serve [--port N] [--threshold N] [--quiet]   # serve the interactive 2D constellation (:5556, verbose by default)
 maw citation graph [--threshold N] [--out P] [--html [P]] [--verbose]  # 2D network → PNG (+ portable interactive HTML)
 ```
@@ -83,9 +84,21 @@ cd ~/.maw/plugins/cf-embed/worker && wrangler dev --port 18787
 
 ## Data
 
-- **Corpus**: `artifacts/literature_corpus.jsonl` — 56 papers
-  (`id / title / journal / topic / summary / thesis_relevance`), our own working
-  copy; upstream is `DustBoy-Phd-Oracle/artifacts/literature_corpus.jsonl`.
+- **Canonical store**: [`ψ/papers/`](../../papers/) — one markdown card per paper, with
+  frontmatter (`citekey / authors / year / journal / quartile / topic / doi / status`) and a
+  `## Notes` section that survives regeneration. See
+  [`ψ/papers/README.md`](../../papers/README.md) for how to add a paper and index by hand.
+  `index` reads cards first and only falls back to the JSONL when none exist.
+- **Import source**: `artifacts/literature_corpus.jsonl` — 56 papers
+  (`id / title / journal / topic / summary / thesis_relevance`), a working copy of
+  `DustBoy-Phd-Oracle/artifacts/literature_corpus.jsonl`. `cards` also merges in the parent's
+  `LITERATURE_REVIEW_PAPERS.md` for real author lists (56/56 matched; 9 read `[Authors]`
+  upstream and are flagged `needs-authors` rather than guessed).
+- **One index for both**: `--vault` embeds `ψ/memory/{learnings,retrospectives,resonance}` and
+  `ψ/writing/research` alongside the papers, tagged `kind: note`. Search spans both; the
+  constellation stays papers-only.
+- **Batching**: embeds go out in groups of 16 (`CF_EMBED_BATCH`) — the worker 500s on one
+  large request once notes are included.
 - **Index**: LanceDB at `$MAW_HOME/citation-data/lancedb` (stable across
   `--force` reinstalls, which wipe the plugin's own tree). `mergeInsert("id")`
   makes re-indexing idempotent.

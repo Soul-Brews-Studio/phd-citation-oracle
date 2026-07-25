@@ -1,0 +1,33 @@
+---
+citekey: jarernwong2023
+id: "2.6.1"
+title: "Health impact related to ambient particulate matter exposure as a spatial health risk map case study in Chiang Mai, Thailand"
+short_title: "Health Risk Map, DustBoy Data"
+authors:
+  - "Jarernwong, K."
+  - "Gheewala, S. H."
+  - "Sampattagul, S."
+year: "2023"
+journal: "Atmosphere"
+quartile: "Q2"
+impact_factor: ""
+volume: "14"
+pages: "261"
+doi: ""
+topic: "health-policy"
+status: ok
+tags: [paper, health-policy]
+kind: paper
+---
+
+# Jarernwong et al. (2023) — Health Risk Map, DustBoy Data
+
+**Key findings** — Correlations: PM2.5 vs dermatitis R=0.84, conjunctivitis R=0.81, stroke R=0.74, lung cancer R=0.73.
+
+**Thesis relevance** — DustBoy data already used for health research -- validates importance of confidence scoring.
+
+**Full citation** — Jarernwong, K., Gheewala, S. H., & Sampattagul, S. (2023). Health impact related to ambient particulate matter exposure as a spatial health risk map case study in Chiang Mai, Thailand. *Atmosphere*, 14(2), 261.
+
+## Notes
+
+<!-- Your notes go here. `maw citation cards` preserves everything under this heading. -->

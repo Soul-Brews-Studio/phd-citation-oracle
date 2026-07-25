@@ -19,10 +19,27 @@ that indexes the paper corpus with **neural embeddings** and renders the citatio
 
 ```bash
 maw citation status                  # corpus + index + embed worker health
-maw citation index                   # embed the corpus → LanceDB
+maw citation cards                   # JSONL → one markdown card per paper in ψ/papers/
+maw citation index --vault           # embed the cards + the oracle's own notes → LanceDB
 maw citation search "biomass burning haze northern thailand"
 maw citation serve                   # interactive 2D constellation (verbose by default)
 maw citation graph --threshold 0.68 --html
+```
+
+**The corpus is markdown, not a database.** Each paper is a card in
+[`ψ/papers/`](ψ/papers/) — `citekey` frontmatter (the filename *is* the `\cite{}` key),
+authors, journal + quartile, topic, and a `## Notes` section for your own thinking that
+survives regeneration. [`ψ/papers/README.md`](ψ/papers/README.md) is the manual for adding a
+paper and indexing by hand.
+
+`index --vault` embeds the cards **and** the oracle's retros, lessons and research notes into
+one index — so a search spans the literature and our own thinking together, labelled
+`📄 paper` or `📝 note`:
+
+```
+$ maw citation search "trust score weighting unreliable sensors" -k 3
+  [0.7913] 📄 paper \cite{mahajan2025} (low-cost-sensor-calibration) Mahajan & Helbing (2025) — Trust-Based Dynamic Calibration
+  [0.8702] 📝 note (ψ/writing/research) Environmental prediction models for PM2.5 — and the prior art we must confront
 ```
 
 - **Embeddings**: `@cf/baai/bge-m3`, 1024-dim, via a local Cloudflare Workers AI worker

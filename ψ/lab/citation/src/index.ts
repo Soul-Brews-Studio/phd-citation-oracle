@@ -1,5 +1,5 @@
 import * as lancedb from "@lancedb/lancedb";
-import { readFile, stat, mkdir } from "node:fs/promises";
+import { readFile, stat, mkdir, readdir } from "node:fs/promises";
 import { join, dirname } from "node:path";
 import sharp from "sharp";
 
@@ -58,6 +58,27 @@ async function embedTexts(texts: string[]): Promise<number[][]> {
   const json = (await res.json()) as { data?: number[][] };
   if (!json.data) throw new Error("Local embed worker returned no data");
   return json.data;
+}
+
+// The embed worker 500s on a large batch (56 papers alone were fine; papers +
+// vault notes were not). Chunk the requests so corpus size never breaks indexing.
+const EMBED_BATCH = Number(process.env.CF_EMBED_BATCH) || 16;
+
+async function embedBatched(texts: string[], onProgress?: (done: number, total: number) => void): Promise<number[][]> {
+  const out: number[][] = [];
+  for (let i = 0; i < texts.length; i += EMBED_BATCH) {
+    const chunk = texts.slice(i, i + EMBED_BATCH);
+    try {
+      out.push(...(await embedTexts(chunk)));
+    } catch (error) {
+      throw new Error(
+        `embed failed on batch ${Math.floor(i / EMBED_BATCH) + 1} (items ${i}–${i + chunk.length - 1}, ` +
+          `longest ${Math.max(...chunk.map((t) => t.length))} chars): ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    onProgress?.(Math.min(i + EMBED_BATCH, texts.length), texts.length);
+  }
+  return out;
 }
 
 async function embedOne(text: string): Promise<number[]> {
@@ -125,8 +146,22 @@ async function checkLanceDB(): Promise<string> {
   try {
     const db = await lancedb.connect(LANCEDB_DIR);
     const tables = await db.tableNames();
-    const rows = tables.includes(TABLE_NAME) ? await (await db.openTable(TABLE_NAME)).countRows() : 0;
-    return `  ✓ LanceDB connected (${LANCEDB_DIR}) — ${tables.length} table(s), ${rows} paper(s) indexed`;
+    if (!tables.includes(TABLE_NAME)) {
+      return `  ⚠ LanceDB connected (${LANCEDB_DIR}) — nothing indexed yet (run "maw citation index")`;
+    }
+    const table = await db.openTable(TABLE_NAME);
+    const total = await table.countRows();
+    // Report papers and notes separately — calling 65 rows "65 papers" when 9 are
+    // vault notes is exactly the kind of quietly-wrong number worth avoiding.
+    let breakdown = `${total} row(s)`;
+    try {
+      const papers = await table.countRows("kind = 'paper'");
+      const notes = await table.countRows("kind = 'note'");
+      breakdown = `${papers} paper(s)` + (notes ? ` + ${notes} vault note(s)` : "");
+    } catch {
+      /* pre-`kind` index — total is all we can say */
+    }
+    return `  ✓ LanceDB connected (${LANCEDB_DIR}) — ${breakdown} indexed`;
   } catch (error) {
     return `  ✗ LanceDB connect failed: ${error instanceof Error ? error.message : String(error)}`;
   }
@@ -159,41 +194,455 @@ async function cmdStatus(): Promise<PluginResult> {
   return { ok: !hardFail, output: lines.join("\n") };
 }
 
-// ── index — embed the paper corpus into the local LanceDB table ──
+// ── paper cards — one markdown file per paper, oracle-style ──
+// The vault is the canonical store: cards are readable, greppable, hand-editable,
+// and indexed alongside the oracle's own notes. JSONL is treated as an import
+// format, not the source of truth.
 
-async function cmdIndex(pathArg?: string): Promise<PluginResult> {
-  const corpusPath = pathArg ? join(repoRoot(), pathArg) : join(repoRoot(), DEFAULT_CORPUS);
-  const st = await stat(corpusPath).catch(() => null);
-  if (!st?.isFile()) return { ok: false, error: `corpus not found: ${corpusPath}` };
+const PAPERS_DIR = "ψ/papers";
+// The parent oracle's reference list carries full author strings the JSONL lacks.
+const UPSTREAM_CITATIONS = [
+  "/opt/Code/github.com/laris-co/DustBoy-Phd-Oracle/ψ/writing/LITERATURE_REVIEW_PAPERS.md",
+  "artifacts/LITERATURE_REVIEW_PAPERS.md",
+];
 
-  const papers = await loadCorpus(corpusPath);
+type Card = {
+  citekey: string;
+  id: string;
+  title: string;        // the real paper title where known
+  shortTitle: string;   // the corpus's descriptive tail
+  authors: string[];
+  year: string;
+  journal: string;
+  quartile: string;
+  impactFactor: string;
+  volume: string;
+  pages: string;
+  topic: string;
+  status: string;       // ok | needs-authors
+  doi: string;
+  summary: string;
+  relevance: string;
+  citationRaw: string;
+  notes: string;        // human-written, preserved across regeneration
+};
+
+/** "Atmospheric Measurement Techniques (Q1, IF ~4.0)" → parts. */
+function splitJournal(j: string): { journal: string; quartile: string; impactFactor: string } {
+  const m = j.match(/^(.*?)\s*\((.*)\)\s*$/);
+  if (!m) return { journal: j.trim(), quartile: "", impactFactor: "" };
+  const inner = m[2];
+  const q = inner.match(/Q([1-4])/);
+  const impact = inner.match(/IF\s*~?\s*([\d.]+)/i);
+  return { journal: m[1].trim(), quartile: q ? `Q${q[1]}` : "", impactFactor: impact ? impact[1] : "" };
+}
+
+/**
+ * Parse one "**Citation:**" line from the upstream reference list:
+ *   Mahajan, S., & Helbing, D. (2025). Dynamic calibration of ... *npj Climate ...*, 8, 257.
+ * Some entries genuinely read "[Authors]" upstream — surfaced as needs-authors
+ * rather than guessed, because those are exactly the ones that block BibTeX.
+ */
+function parseCitation(raw: string): { authors: string[]; year: string; title: string; journal: string; volume: string; pages: string } {
+  const out = { authors: [] as string[], year: "", title: "", journal: "", volume: "", pages: "" };
+  if (!raw) return out;
+  const yearMatch = raw.match(/\((\d{4})[a-z]?\)\.\s*/);
+  if (!yearMatch) return out;
+  out.year = yearMatch[1];
+  const authorPart = raw.slice(0, yearMatch.index).trim().replace(/[,\s]+$/, "");
+  const rest = raw.slice((yearMatch.index ?? 0) + yearMatch[0].length);
+
+  if (!/^\[Authors?\]/i.test(authorPart)) {
+    // "Surname, A. B., Surname2, C., & Surname3, D." → keep "Surname, A. B." units
+    out.authors = authorPart
+      .replace(/\s*&\s*/g, ", ")
+      .split(/,\s*(?=[A-Z][A-Za-z'\-]+,)/)
+      .map((s) => s.replace(/[,\s]+$/, "").trim())
+      .filter((s) => s && !/^et al\.?$/i.test(s));
+  }
+
+  const journalMatch = rest.match(/\*([^*]+)\*/);
+  out.title = (journalMatch ? rest.slice(0, journalMatch.index) : rest).replace(/\.\s*$/, "").trim();
+  if (journalMatch) {
+    out.journal = journalMatch[1].trim();
+    const tail = rest.slice((journalMatch.index ?? 0) + journalMatch[0].length);
+    const vp = tail.match(/,\s*([0-9]+)(?:\s*\(([^)]*)\))?,?\s*([0-9]+(?:-{1,2}[0-9]+)?)?/);
+    if (vp) {
+      out.volume = vp[1] ?? "";
+      out.pages = vp[3] ?? "";
+    }
+  }
+  return out;
+}
+
+/** Read the upstream reference list into id → raw citation. */
+async function loadUpstreamCitations(): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  for (const candidate of UPSTREAM_CITATIONS) {
+    const path = candidate.startsWith("/") ? candidate : join(repoRoot(), candidate);
+    const text = await readFile(path, "utf-8").catch(() => "");
+    if (!text) continue;
+    // ### 2.1.4 Title …    then the following **Citation:** line
+    const re = /^###\s+(\d+(?:\.\d+)*)\s+.*$/gm;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(text))) {
+      const after = text.slice(m.index, m.index + 1400);
+      const cite = after.match(/\*\*Citation:\*\*\s*(.+)/);
+      if (cite) map.set(m[1], cite[1].trim());
+    }
+    if (map.size) break;
+  }
+  return map;
+}
+
+function citekeyFor(authors: string[], year: string, journal: string, fallback: string): string {
+  const surname = authors[0]?.split(",")[0]?.trim() ?? "";
+  const base = surname
+    ? surname.toLowerCase().replace(/[^a-z]/g, "")
+    : (journal.match(/\b[A-Za-z]+/g) ?? [fallback])
+        .slice(0, 2).join("").toLowerCase().replace(/[^a-z]/g, "") || "unknown";
+  return `${base}${year || ""}`;
+}
+
+function yamlEscape(s: string): string {
+  return `"${String(s).replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
+}
+
+/**
+ * "Mahajan, S." + "Helbing, D." + 2025 → "Mahajan & Helbing (2025)".
+ * Also the bridge that keeps card titles in the corpus's "Author (year) -- Short"
+ * shape, which shortLabel()/paperName() rely on for the graph's two-line labels.
+ */
+function citeLabel(authors: string[], year: string, journal: string): string {
+  const surnames = authors.map((a) => a.split(",")[0].trim()).filter(Boolean);
+  const who =
+    surnames.length === 0 ? journal || "Unknown"
+    : surnames.length === 1 ? surnames[0]
+    : surnames.length === 2 ? `${surnames[0]} & ${surnames[1]}`
+    : `${surnames[0]} et al.`;
+  return `${who} (${year || "n.d."})`;
+}
+
+function renderCard(c: Card): string {
+  const authorBlock = c.authors.length
+    ? `authors:\n${c.authors.map((a) => `  - ${yamlEscape(a)}`).join("\n")}`
+    : "authors: []";
+  const heading = `${citeLabel(c.authors, c.year, c.journal)} — ${c.shortTitle || c.title}`;
+  return `---
+citekey: ${c.citekey}
+id: ${yamlEscape(c.id)}
+title: ${yamlEscape(c.title || c.shortTitle)}
+short_title: ${yamlEscape(c.shortTitle)}
+${authorBlock}
+year: ${yamlEscape(c.year)}
+journal: ${yamlEscape(c.journal)}
+quartile: ${yamlEscape(c.quartile)}
+impact_factor: ${yamlEscape(c.impactFactor)}
+volume: ${yamlEscape(c.volume)}
+pages: ${yamlEscape(c.pages)}
+doi: ${yamlEscape(c.doi)}
+topic: ${yamlEscape(c.topic)}
+status: ${c.status}
+tags: [paper, ${c.topic}]
+kind: paper
+---
+
+# ${heading}
+
+**Key findings** — ${c.summary || "_not recorded_"}
+
+**Thesis relevance** — ${c.relevance || "_not recorded_"}
+
+**Full citation** — ${c.citationRaw || "_not recorded upstream_"}
+${c.status === "needs-authors" ? "\n> ⚠️ Authors are unrecorded upstream (the reference list reads `[Authors]`). Resolve before this paper can go into a `.bib`.\n" : ""}
+## Notes
+
+${c.notes.trim() || "<!-- Your notes go here. `maw citation cards` preserves everything under this heading. -->"}
+`;
+}
+
+/** Everything under "## Notes" — preserved so regeneration never eats human work. */
+function extractNotes(existing: string): string {
+  const m = existing.match(/^##\s+Notes\s*$([\s\S]*)/m);
+  if (!m) return "";
+  const body = m[1].trim();
+  return body.startsWith("<!--") && body.endsWith("-->") ? "" : body;
+}
+
+/** Minimal frontmatter reader — machine-written, but tolerant of hand edits. */
+function parseFrontmatter(text: string): Record<string, string | string[]> {
+  const m = text.match(/^---\n([\s\S]*?)\n---/);
+  const out: Record<string, string | string[]> = {};
+  if (!m) return out;
+  let listKey = "";
+  for (const line of m[1].split("\n")) {
+    const item = line.match(/^\s+-\s+(.*)$/);
+    if (item && listKey) {
+      const v = item[1].trim().replace(/^"(.*)"$/, "$1");
+      (out[listKey] as string[]).push(v);
+      continue;
+    }
+    const kv = line.match(/^([A-Za-z_][A-Za-z0-9_]*):\s*(.*)$/);
+    if (!kv) continue;
+    const [, key, rawVal] = kv;
+    const val = rawVal.trim();
+    if (val === "" ) { listKey = key; out[key] = []; continue; }
+    listKey = "";
+    if (val === "[]") { out[key] = []; continue; }
+    const inline = val.match(/^\[(.*)\]$/);
+    if (inline) {
+      out[key] = inline[1].split(",").map((s) => s.trim().replace(/^"(.*)"$/, "$1")).filter(Boolean);
+      continue;
+    }
+    out[key] = val.replace(/^"(.*)"$/, "$1");
+  }
+  return out;
+}
+
+async function cmdCards(rest: string[]): Promise<PluginResult> {
+  const corpusArg = rest.find((a) => a.endsWith(".jsonl"));
+  const corpusPath = corpusArg ? join(repoRoot(), corpusArg) : join(repoRoot(), DEFAULT_CORPUS);
+  const papers = await loadCorpus(corpusPath).catch(() => [] as Paper[]);
   if (!papers.length) return { ok: false, error: `no papers parsed from ${corpusPath}` };
 
-  const lines = [`Loaded ${papers.length} paper(s) from ${corpusPath}`];
-  const texts = papers.map(paperText);
-  const vectors = await embedTexts(texts);
+  const citations = await loadUpstreamCitations();
+  const dir = join(repoRoot(), PAPERS_DIR);
+  await mkdir(dir, { recursive: true });
 
-  type Row = {
-    id: string;
-    title: string;
-    journal: string;
-    topic: string;
-    text: string;
-    vector: number[];
-    indexed_at: string;
-  };
+  // Build cards first so citekey collisions can be disambiguated deterministically.
+  const cards: Card[] = [];
+  const used = new Map<string, number>();
+  for (const p of papers.sort((a, b) => String(a.id).localeCompare(String(b.id), undefined, { numeric: true }))) {
+    const raw = citations.get(String(p.id)) ?? "";
+    const parsed = parseCitation(raw);
+    const j = splitJournal(p.journal ?? "");
+    const shortTitle = paperName(p.title) || p.title;
+    const yearFromTitle = p.title.match(/\((\d{4})[a-z]?\)/)?.[1] ?? "";
+    const year = parsed.year || yearFromTitle;
+    let key = citekeyFor(parsed.authors, year, parsed.journal || j.journal, String(p.id));
+    const seen = used.get(key) ?? 0;
+    used.set(key, seen + 1);
+    if (seen) key = `${key}${String.fromCharCode(97 + seen)}`; // b, c, …
+    cards.push({
+      citekey: key,
+      id: String(p.id),
+      title: parsed.title || shortTitle,
+      shortTitle,
+      authors: parsed.authors,
+      year,
+      journal: parsed.journal || j.journal,
+      quartile: j.quartile,
+      impactFactor: j.impactFactor,
+      volume: parsed.volume,
+      pages: parsed.pages,
+      topic: p.topic ?? "uncategorized",
+      status: parsed.authors.length ? "ok" : "needs-authors",
+      doi: "",
+      summary: p.summary ?? "",
+      relevance: p.thesis_relevance ?? "",
+      citationRaw: raw,
+      notes: "",
+    });
+  }
+
+  let created = 0, updated = 0, keptNotes = 0;
+  for (const c of cards) {
+    const path = join(dir, `${c.citekey}.md`);
+    const existing = await readFile(path, "utf-8").catch(() => "");
+    if (existing) {
+      c.notes = extractNotes(existing);
+      if (c.notes) keptNotes++;
+      // A hand-added DOI must survive regeneration — it is the point of the .bib work.
+      const fm = parseFrontmatter(existing);
+      if (typeof fm.doi === "string" && fm.doi) c.doi = fm.doi;
+      updated++;
+    } else created++;
+    await Bun.write(path, renderCard(c));
+  }
+
+  // Browsable index, thesis order (by id), grouped by topic.
+  const byTopic = new Map<string, Card[]>();
+  for (const c of cards) {
+    if (!byTopic.has(c.topic)) byTopic.set(c.topic, []);
+    byTopic.get(c.topic)!.push(c);
+  }
+  const needAuthors = cards.filter((c) => c.status === "needs-authors");
+  const indexMd = [
+    "# Paper cards",
+    "",
+    `${cards.length} papers, one markdown card each — the canonical store. Regenerate with`,
+    "`maw citation cards` (your `## Notes` and any `doi:` you add are preserved).",
+    "",
+    `Generated from \`${corpusArg ?? DEFAULT_CORPUS}\`${citations.size ? ` + ${citations.size} upstream citations` : ""}.`,
+    "",
+    ...[...byTopic.keys()].sort().flatMap((topic) => [
+      `## ${topic} (${byTopic.get(topic)!.length})`,
+      "",
+      "| id | citekey | paper | journal |",
+      "|---|---|---|---|",
+      ...byTopic.get(topic)!.map((c) =>
+        `| ${c.id} | [\`${c.citekey}\`](${c.citekey}.md) | ${c.shortTitle.replace(/\|/g, "\\|")} | ${c.journal.replace(/\|/g, "\\|")}${c.quartile ? ` (${c.quartile})` : ""} |`),
+      "",
+    ]),
+    ...(needAuthors.length
+      ? ["## ⚠️ Needs authors before `.bib`", "",
+         `${needAuthors.length} card(s) whose authors are unrecorded upstream (the reference list reads \`[Authors]\`):`, "",
+         ...needAuthors.map((c) => `- \`${c.citekey}\` (${c.id}) — ${c.shortTitle}`), ""]
+      : []),
+  ].join("\n");
+  await Bun.write(join(dir, "INDEX.md"), indexMd);
+
+  const out = [
+    `✦ ${cards.length} paper card(s) → ${dir}`,
+    `  created ${created} · updated ${updated} · notes preserved on ${keptNotes}`,
+    `  upstream citations matched: ${citations.size}/${cards.length}`,
+    `  index: ${join(dir, "INDEX.md")}`,
+  ];
+  if (needAuthors.length) {
+    out.push(`  ⚠ ${needAuthors.length} card(s) need authors before BibTeX: ${needAuthors.map((c) => c.citekey).join(", ")}`);
+  }
+  out.push(`\nNext: maw citation index   (cards are picked up automatically)`);
+  return { ok: true, output: out.join("\n") };
+}
+
+/** Read the markdown cards back — this is what `index` prefers over the JSONL. */
+async function readPaperCards(): Promise<Array<Paper & { citekey: string; notes: string }>> {
+  const dir = join(repoRoot(), PAPERS_DIR);
+  let names: string[] = [];
+  try {
+    names = (await readdir(dir)).filter((n) => n.endsWith(".md") && n !== "INDEX.md");
+  } catch {
+    return [];
+  }
+  const out: Array<Paper & { citekey: string; notes: string }> = [];
+  for (const name of names.sort()) {
+    const text = await readFile(join(dir, name), "utf-8").catch(() => "");
+    if (!text) continue;
+    const fm = parseFrontmatter(text);
+    const body = text.replace(/^---\n[\s\S]*?\n---\n/, "");
+    const grab = (label: string) =>
+      body.match(new RegExp(`\\*\\*${label}\\*\\*\\s*—\\s*([\\s\\S]*?)(?=\\n\\n|\\n##|$)`))?.[1]?.trim() ?? "";
+    const str = (k: string) => (typeof fm[k] === "string" ? (fm[k] as string) : "");
+    const authors = Array.isArray(fm.authors) ? (fm.authors as string[]) : [];
+    // Rebuild the corpus's "Author (year) -- Short title" shape: the graph's
+    // two-line labels are produced by shortLabel()/paperName() splitting on " -- ".
+    const label = citeLabel(authors, str("year"), str("journal"));
+    const short = str("short_title") || str("title");
+    out.push({
+      id: str("id") || name.replace(/\.md$/, ""),
+      citekey: str("citekey") || name.replace(/\.md$/, ""),
+      title: short ? `${label} -- ${short}` : label,
+      journal: [str("journal"), str("quartile") ? `(${str("quartile")})` : ""].filter(Boolean).join(" "),
+      topic: str("topic") || "uncategorized",
+      summary: grab("Key findings"),
+      thesis_relevance: grab("Thesis relevance"),
+      notes: extractNotes(text),
+    });
+  }
+  return out;
+}
+
+// ── index — embed the corpus (cards first, JSONL as fallback) into LanceDB ──
+
+type Row = {
+  id: string;
+  kind: string;        // paper | note — lets one index serve both without confusing them
+  citekey: string;
+  title: string;
+  journal: string;
+  topic: string;
+  path: string;        // where it came from, for notes
+  text: string;
+  vector: number[];
+  indexed_at: string;
+};
+
+/** Vault notes (retros, lessons, research) so search spans papers AND our own thinking. */
+const VAULT_DIRS = ["ψ/memory/learnings", "ψ/memory/retrospectives", "ψ/memory/resonance", "ψ/writing/research"];
+
+async function walkMarkdown(dir: string): Promise<string[]> {
+  const out: string[] = [];
+  let entries;
+  try {
+    entries = await readdir(dir, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    const full = join(dir, e.name);
+    if (e.isDirectory()) out.push(...(await walkMarkdown(full)));
+    else if (e.isFile() && e.name.endsWith(".md")) out.push(full);
+  }
+  return out;
+}
+
+async function cmdIndex(rest: string[]): Promise<PluginResult> {
+  const pathArg = rest.find((a) => a.endsWith(".jsonl"));
+  const withVault = rest.includes("--vault");
+  const lines: string[] = [];
+
+  // Cards are canonical. Fall back to the JSONL only when no cards exist yet.
+  let papers: Array<Paper & { citekey?: string; notes?: string }> = await readPaperCards();
+  if (papers.length) {
+    lines.push(`Loaded ${papers.length} paper card(s) from ${join(repoRoot(), PAPERS_DIR)}`);
+  } else {
+    const corpusPath = pathArg ? join(repoRoot(), pathArg) : join(repoRoot(), DEFAULT_CORPUS);
+    const st = await stat(corpusPath).catch(() => null);
+    if (!st?.isFile()) return { ok: false, error: `no cards in ${PAPERS_DIR} and no corpus at ${corpusPath} — run "maw citation cards" first` };
+    papers = await loadCorpus(corpusPath);
+    if (!papers.length) return { ok: false, error: `no papers parsed from ${corpusPath}` };
+    lines.push(`Loaded ${papers.length} paper(s) from ${corpusPath} (no cards yet — run "maw citation cards")`);
+  }
+
+  // A card's own notes are signal too, so they join the embedded text.
+  const paperTexts = papers.map((p) => [paperText(p), p.notes].filter(Boolean).join("\n\n"));
+
+  const noteFiles: string[] = [];
+  if (withVault) {
+    for (const d of VAULT_DIRS) noteFiles.push(...(await walkMarkdown(join(repoRoot(), d))));
+    lines.push(`Loaded ${noteFiles.length} vault note(s) from ${VAULT_DIRS.join(", ")}`);
+  }
+  const noteTexts = await Promise.all(
+    noteFiles.map(async (f) => (await readFile(f, "utf-8").catch(() => "")).slice(0, 3000)),
+  );
+
+  const allTexts = [...paperTexts, ...noteTexts];
+  const vectors = await embedBatched(allTexts);
+  lines.push(`Embedded ${vectors.length} item(s) in batches of ${EMBED_BATCH}`);
+  const now = new Date().toISOString();
+
   const rows: Row[] = [];
   papers.forEach((p, i) => {
     const vector = vectors[i];
     if (!vector) return;
     rows.push({
-      id: String(p.id ?? p.title),
+      id: `paper:${p.citekey ?? p.id ?? p.title}`,
+      kind: "paper",
+      citekey: p.citekey ?? "",
       title: p.title,
       journal: p.journal ?? "",
       topic: p.topic ?? "uncategorized",
-      text: texts[i],
+      path: p.citekey ? `${PAPERS_DIR}/${p.citekey}.md` : "",
+      text: paperTexts[i],
       vector,
-      indexed_at: new Date().toISOString(),
+      indexed_at: now,
+    });
+  });
+  noteFiles.forEach((f, i) => {
+    const vector = vectors[papers.length + i];
+    if (!vector) return;
+    const rel = f.replace(`${repoRoot()}/`, "");
+    rows.push({
+      id: `note:${rel}`,
+      kind: "note",
+      citekey: "",
+      title: noteTexts[i].match(/^#\s+(.+)$/m)?.[1]?.trim() ?? rel.split("/").pop() ?? rel,
+      journal: "",
+      topic: rel.split("/").slice(0, 3).join("/"),
+      path: rel,
+      text: noteTexts[i],
+      vector,
+      indexed_at: now,
     });
   });
   if (!rows.length) return { ok: false, error: "embedding produced no rows" };
@@ -202,14 +651,28 @@ async function cmdIndex(pathArg?: string): Promise<PluginResult> {
   const tableNames = await db.tableNames();
   if (tableNames.includes(TABLE_NAME)) {
     const table = await db.openTable(TABLE_NAME);
-    await table.mergeInsert("id").whenMatchedUpdateAll().whenNotMatchedInsertAll().execute(rows);
+    // mergeInsert fails on a schema change (new kind/citekey/path columns), so
+    // recreate when the stored schema no longer matches what we write.
+    const stored = new Set((await table.schema()).fields.map((f) => f.name));
+    const wanted = Object.keys(rows[0]);
+    if (wanted.every((k) => stored.has(k)) && stored.size === wanted.length) {
+      await table.mergeInsert("id").whenMatchedUpdateAll().whenNotMatchedInsertAll().execute(rows);
+    } else {
+      lines.push(`(schema changed — rebuilding the "${TABLE_NAME}" table)`);
+      await db.dropTable(TABLE_NAME);
+      await db.createTable(TABLE_NAME, rows);
+    }
   } else {
     await db.createTable(TABLE_NAME, rows);
   }
 
-  const topics = [...new Set(rows.map((r) => r.topic))].sort();
-  lines.push(`\n✓ indexed ${rows.length} paper(s) across ${topics.length} topic(s):`);
-  for (const t of topics) lines.push(`    ${rows.filter((r) => r.topic === t).length.toString().padStart(3)}  ${t}`);
+  const paperRows = rows.filter((r) => r.kind === "paper");
+  const topics = [...new Set(paperRows.map((r) => r.topic))].sort();
+  lines.push(`\n✓ indexed ${paperRows.length} paper(s) across ${topics.length} topic(s):`);
+  for (const t of topics) lines.push(`    ${paperRows.filter((r) => r.topic === t).length.toString().padStart(3)}  ${t}`);
+  const noteRows = rows.filter((r) => r.kind === "note");
+  if (noteRows.length) lines.push(`✓ indexed ${noteRows.length} vault note(s) alongside them (searchable together)`);
+  else lines.push(`  (add --vault to index retros/lessons/research alongside the papers)`);
   return { ok: true, output: lines.join("\n") };
 }
 
@@ -242,18 +705,26 @@ async function cmdSearch(rest: string[]): Promise<PluginResult> {
   if (json) {
     const payload = results.map((r: Record<string, unknown>) => ({
       distance: r._distance ?? null,
+      kind: String(r.kind ?? "paper"),
+      citekey: String(r.citekey ?? ""),
       id: String(r.id),
       title: String(r.title),
       journal: String(r.journal),
       topic: String(r.topic),
+      path: String(r.path ?? ""),
     }));
     return { ok: true, output: JSON.stringify(payload, null, 2) };
   }
 
-  const lines = [`Top ${results.length} paper(s) for "${query}":\n`];
+  const lines = [`Top ${results.length} result(s) for "${query}":\n`];
   for (const r of results) {
-    lines.push(`  [${r._distance?.toFixed(4)}] (${r.topic}) ${r.title}`);
+    const kind = String(r.kind ?? "paper");
+    const tag = kind === "note" ? "📝 note" : "📄 paper";
+    const key = String(r.citekey ?? "");
+    lines.push(`  [${r._distance?.toFixed(4)}] ${tag}${key ? ` \\cite{${key}}` : ""} (${r.topic}) ${r.title}`);
+    const where = String(r.path ?? "");
     if (String(r.journal)) lines.push(`    ${r.journal}`);
+    if (where) lines.push(`    ${where}`);
     lines.push("");
   }
   return { ok: true, output: lines.join("\n") };
@@ -467,8 +938,12 @@ async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { 
     return { error: `table "${TABLE_NAME}" doesn't exist yet — run "maw citation index" first` };
   }
   const table = await db.openTable(TABLE_NAME);
-  const rows = await table.query().toArray();
-  if (rows.length === 0) return { error: 'index is empty — run "maw citation index" first' };
+  // The constellation maps PAPERS. Vault notes may share the index (--vault) but
+  // would distort a literature layout, so they are excluded here.
+  const rows = (await table.query().toArray()).filter(
+    (r: Record<string, unknown>) => String(r.kind ?? "paper") === "paper",
+  );
+  if (rows.length === 0) return { error: 'no papers in the index — run "maw citation index" first' };
 
   const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
   const tsneStart = Date.now();
@@ -664,8 +1139,10 @@ async function cmdGraph(rest: string[]): Promise<PluginResult> {
     return { ok: false, error: `table "${TABLE_NAME}" doesn't exist yet — run "maw citation index" first` };
   }
   const table = await db.openTable(TABLE_NAME);
-  const rows = await table.query().toArray();
-  if (rows.length === 0) return { ok: false, error: 'index is empty — run "maw citation index" first' };
+  const rows = (await table.query().toArray()).filter(
+    (r: Record<string, unknown>) => String(r.kind ?? "paper") === "paper",
+  );
+  if (rows.length === 0) return { ok: false, error: 'no papers in the index — run "maw citation index" first' };
 
   const vectors = rows.map((r: Record<string, unknown>) => Array.from(r.vector as ArrayLike<number>));
   const nodes = rows.map((r: Record<string, unknown>) => ({
@@ -798,7 +1275,8 @@ function helpText(): string {
 
 Usage:
   maw citation status                        Corpus + arra backend + LanceDB + Cloudflare embed, one check
-  maw citation index [corpus.jsonl]          Embed the paper corpus (default: ${DEFAULT_CORPUS}) into LanceDB
+  maw citation cards [corpus.jsonl]          Build/refresh one markdown card per paper in ${PAPERS_DIR}/ (+ INDEX.md). Your \`## Notes\` and any \`doi:\` you add are preserved
+  maw citation index [--vault] [corpus.jsonl]  Embed the cards into LanceDB (falls back to the JSONL if no cards exist). --vault also indexes retros/lessons/research so search spans both
   maw citation search <query> [-k N] [--json]  Semantic search over indexed papers (default k=5)
   maw citation serve [--port N] [--threshold N] [--quiet]  Serve the interactive 2D constellation (default port 5556, verbose by default; alias: visualize)
   maw citation graph [--threshold N] [--out PATH] [--html [PATH]]  Render the 2D labeled similarity network → PNG (default artifacts/citation-network.png, threshold 0.5); --html also writes the interactive page
@@ -816,7 +1294,7 @@ Env:
 Roadmap: bib (JSONL → .bib keys), graph (citation edges). Not built yet — cite what's real.`;
 }
 
-const KNOWN_COMMANDS = ["status", "index", "search", "serve", "visualize", "graph"] as const;
+const KNOWN_COMMANDS = ["status", "cards", "index", "search", "serve", "visualize", "graph"] as const;
 
 function levenshtein(a: string, b: string): number {
   const dp: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array(b.length).fill(0)]);
@@ -843,8 +1321,10 @@ export async function handler(ctx: InvokeContext): Promise<PluginResult> {
   switch (cmd) {
     case "status":
       return cmdStatus();
+    case "cards":
+      return cmdCards(rest);
     case "index":
-      return cmdIndex(rest[0]);
+      return cmdIndex(rest);
     case "search":
       return cmdSearch(rest);
     case "serve":       // `serve` and `visualize` are the same command
