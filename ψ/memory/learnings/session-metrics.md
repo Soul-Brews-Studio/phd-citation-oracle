@@ -1,0 +1,7 @@
+# Oracle Session Metrics
+
+Rule (parent CLAUDE.md §"Self-Evaluation Loop"): same friction 3 sessions → fix root cause, not another workaround.
+
+| when | session | done | stuck | win | friction | error |
+|---|---|---|---|---|---|---|
+| 2026-07-25 16:11 | c59ddec8 | awakening (parent-consulted); 4-oracle image dig resolved + digger's wiki corrected; `maw citation` plugin (status/index/search/serve/graph, bge-m3 + LanceDB + t-SNE + interactive page); 2 Sonnet research reports; `/gemini-deep-research` skill (generic, skill-creator structure); repo open-sourced; 10 commits | CCC/Bland–Altman/Deming need the parent's paired CSV (only r/bias/RMSE available); EPA + EU numeric tables unverified (paywall blocked WebFetch); 52-paper PDFs don't exist locally so `.bib` needs DOI re-sourcing | Neural (bge-m3) search cleanly separates topics that TF-IDF smeared — "biomass burning northern thailand" returns all 5 Thailand-burning papers; the citation graph is real | Stale LSP diagnostics (installed copy double-indexed under the same basename `index.ts`) cost ~8 re-verifications with tsc; leaked 4 background test servers because `pkill -f 'citation visualize'` never matched (process is `bun`); one 2-min Bash timeout from a foreground server | Declared the `serve`-output fix verified from a redirected-pipe test that never exercised the user's TTY path, then told him to re-run — he burned 2 blind runs. Real fix needed `/dev/tty` + a PTY test (`script -q /dev/null`) |
