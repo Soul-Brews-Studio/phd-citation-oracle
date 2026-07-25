@@ -11,7 +11,7 @@ maw citation bib --by-topic         # เรียงตาม 6 taproot แท�
 ```
 
 อ่านการ์ดใน `ψ/papers/` ประกอบเป็น `@article{}` เขียนทับทุก
-ครั้ง — การ์ดคือความจริง `.bib` generate ซ้ำได้เสมอ
+ครั้ง — การ์ดคือความจริง `.bib` generate ซ้ำได้
 
 `--by-topic` คั่นกลุ่มด้วย `% ── <topic> ──` เช็คจำนวน paper
 ต่อ topic
@@ -49,7 +49,7 @@ function bibAuthors(authors: string[]): string {
 
 ## 15.3 ตัวอย่าง entry จริง — `jarernwong2021`
 
-ไม่มี `doi` ไม่มี `note` (ยังไม่ verify กับ Crossref) แต่ครบ
+ไม่มี `doi` ไม่มี `note` (ยังไม่ verify) แต่ครบ
 author/title/journal/year — citable ปกติ
 
 ```
@@ -98,16 +98,15 @@ diff การ์ดกับก่อน verify (`051014b`) แยก error จ
 | journal ผิด | 1 | thongsame2024 |
 | volume ผิด | 2 | buya2025, chen2024 |
 
-รวม 18 จุด ใน 14 การ์ด — `chen2024` โดน 3 จุดพร้อมกัน (author,
-pages, volume) นอกจากนี้มี 8 benign + 2 reformat ไม่นับเป็น
-error
+รวม 18 จุด ใน 14 การ์ด — `chen2024` โดน 3 จุด (author, pages,
+volume) นอกจากนี้มี 8 benign + 2 reformat ไม่นับ
 
 เคสหนักสุด: `buya2023` กับ `wongnakae2023` — citekey เดิมมาจาก
 "Amnuaylojaroen, T." ที่ไม่อยู่ใน author list จริงเลย เอา
 author ผิดใบมาแปะ
 
-ทุกการ์ดที่ rekey เก็บ citekey เดิมไว้ที่ `aka:` — `buya2025`
-มี `aka: taneepanichskuld2025` ไม่มีใบไหนถูกลบทิ้งจริง
+การ์ดที่ rekey เก็บ citekey เดิมไว้ที่ `aka:` — `buya2025`
+มี `aka: taneepanichskuld2025` ไม่มีใบไหนถูกลบทิ้ง
 
 **คำเตือน**: rekey แล้ว vector store เก่ายังผูก embedding กับ
 citekey เก่า — `citation doi --write` เตือนทุกครั้งที่ rekey
@@ -125,7 +124,7 @@ citation index --vault
 
 4 ใน 7 จุดเลขหน้าผิด มาจากหยิบเลขท้าย DOI เขียนเป็นเลขหน้า
 ตรงๆ — journal born-digital ใช้ "article number" แทนเลขหน้า
-เลขฝังอยู่ใน DOI เอง หยิบผิดตัวได้ง่าย
+เลขฝังอยู่ใน DOI หยิบผิดตัวง่าย
 
 | citekey | DOI ลงท้าย | เขียนไว้ | จริง |
 |---|---|---|---|
@@ -134,14 +133,14 @@ citation index --vault
 | villarrealmarines2024 | -00837-5 | 837 | 293 |
 | koziel2025 | -02069-w | 2069 | 18573 |
 
-บั๊กนี้เงียบเพราะดูสมเหตุสมผลทุกกรณี — title แต่งขึ้นยังเทียบ
-DOI ได้ similarity ต่ำ (0.33) จับได้ แต่เลขหน้าไม่มี signal
-บอกว่าผิด ต้องดึง field เต็มจาก Crossref มาเทียบ ไม่ใช่แค่
-เช็คว่า DOI resolve ได้
+บั๊กนี้เงียบเพราะดูสมเหตุสมผล — title แต่งขึ้นยังเทียบ DOI ได้
+similarity ต่ำ (0.33) จับได้ แต่เลขหน้าไม่มี signal บอกว่าผิด
+ต้องดึง field เต็มจาก Crossref มาเทียบ ไม่ใช่แค่เช็คว่า DOI
+resolve ได้
 
 error กลุ่มนี้ไม่เคยโผล่ตอน `search`/`graph` เพราะ embed แค่
 `title + summary + thesis_relevance` เลขหน้าไม่อยู่ในเวกเตอร์
-เลย `citation doi --all` กับ bibtex จึงต้องคู่กับ `search` ต่อไป
+`citation doi --all` กับ bibtex จึงต้องคู่กับ `search`
 
 ## 15.7 ที่เราผิดเอง
 
@@ -152,11 +151,11 @@ error กลุ่มนี้ไม่เคยโผล่ตอน `search`/`
 | NUL byte ดิบใน sort key ทำ ripgrep มองไฟล์เป็น binary เกือบเข้าใจผิดว่า `sharp` ไม่ได้ใช้แล้ว | เขียน escape `\u0000` แทนตัวอักษรดิบเสมอ |
 | `git add -A` เผลอเอา `.codex/` เข้า repo public (Nat จับได้ ไม่ใช่เรา) | review `git diff --cached --name-only` ก่อน commit ทุกครั้ง |
 
-นับ error ผิดข้อแรกอันตรายกว่าที่ฟังดู เพราะนับน้อยกว่าความ
-จริง — audit ดูน่าเชื่อถือเกินจริง
+นับ error ผิดข้อแรกอันตราย เพราะนับน้อยกว่าความจริง — audit
+ดูน่าเชื่อถือเกินจริง
 
-ทั้ง 4 ข้อมีเส้นเดียวกัน — เชื่อคำอธิบายตัวเองมากกว่าหลักฐาน
-ข้างนอก มาตรฐานนี้ต้องใช้กับงานตัวเองด้วย
+ทั้ง 4 ข้อ: เชื่อคำอธิบายตัวเองมากกว่าหลักฐานข้างนอก
+มาตรฐานนี้ต้องใช้กับงานตัวเองด้วย
 
 ## ต่อจากนี้
 

@@ -74,8 +74,7 @@ vector space เดียวกัน embed ต่อ paper คือ title+summ
 | bge-m3 ใน VRAM | 634 MB · ctx 8192 · 100% GPU |
 
 เงื่อนไข: model ต้อง warm ใน GPU อยู่แล้ว (ครั้งแรกหลังเครื่องว่างนาน
-เสียเวลาโหลด VRAM เพิ่ม) เฉลี่ยวินาทีละ 9 รายการ — เร็วพอสั่ง index ซ้ำ
-บ่อยๆ ได้
+เสียเวลาโหลด VRAM เพิ่ม) เฉลี่ยวินาทีละ 9 รายการ — เร็วพอสั่งซ้ำบ่อยๆ ได้
 
 search คือ embed คำถามแล้วเทียบ cosine กับ 75 แถวแบบ brute-force เขียนล้วน
 ด้วย TypeScript — เล็กเกินกว่าต้องใช้โครงสร้างซับซ้อน:
@@ -93,7 +92,7 @@ search คือ embed คำถามแล้วเทียบ cosine กั�
 
 store บนดิสก์ = 3 ไฟล์ธรรมดา ไม่ใช่ database: `vectors.f32` (75 × 1024
 float32) `meta.jsonl` (metadata) `manifest.json` (ชื่อ model) — สลับ model
-ต้อง index ใหม่ทั้งชุด ลบโฟลเดอร์ store ทิ้งได้เสมอ เป็น derived data ล้วนๆ
+ต้อง index ใหม่ทั้งชุด ลบทิ้งได้เสมอ เป็น derived data ล้วนๆ
 
 ## 7.4 batch 16 — เคสยิงทีเดียวหมดแล้วพัง
 
@@ -104,8 +103,8 @@ CF_EMBED_BATCH=16   # ค่า default
 ```
 
 ตอน corpus มีแค่ 56 paper ยิงทีเดียวยังผ่าน พอรวม note ทะลุ 65 รายการ
-เริ่มพัง — worker ตอบ error 500 ตรงๆ ไม่ค่อยๆ ช้าแบบ timeout ไม่ว่าเหตุ
-จะเป็น payload limit หรือ timeout ฝั่ง worker ผลที่เห็นคือ 500 เหมือนกัน
+เริ่มพัง — worker ตอบ error 500 ตรงๆ ไม่ว่าจะเพราะ payload limit หรือ
+timeout ฝั่ง worker ผลที่เห็นคือ 500 เหมือนกัน
 
 ทางแก้: หั่นชุดละ 16 รอผลก่อนส่งชุดถัดไป (75 รายการ = 5 รอบ) เป็น
 default อยู่แล้ว RAM น้อยหรือ backend limit ต่ำกว่า 16 ลด batch ได้ตรงๆ:
@@ -148,8 +147,8 @@ ollama unload model เองหลังไม่ใช้งาน ~5 นา�
 อาการพัง ยืนยันด้วย `size` vs `size_vram` ไม่ใช่เดาจากความรู้สึก
 
 ถ้าเช็คครบแล้วยัง `no embedding backend reachable` บังคับด้วย
-`CITATION_EMBED=ollama` ก่อน จะเห็น error message ชัดกว่าเดิม เทียบ
-backend ที่ 2 ตอนดีบัก เปิดคู่กันได้ด้วย wrangler ที่ล็อกอินไว้แล้ว:
+`CITATION_EMBED=ollama` จะเห็น error ชัดกว่าเดิม เทียบ backend ที่ 2 ตอน
+ดีบัก เปิดคู่กันได้ด้วย wrangler ที่ล็อกอินไว้แล้ว:
 
 ```bash
 cd ~/.maw/plugins/cf-embed/worker
