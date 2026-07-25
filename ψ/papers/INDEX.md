@@ -1,9 +1,9 @@
 # Paper cards
 
-62 papers, one markdown card each — the canonical store. Regenerate with
+63 papers, one markdown card each — the canonical store. Regenerate with
 `citation cards` (your `## Notes` and any `doi:` you add are preserved).
 
-61/62 carry a Crossref-verified DOI. Resolve the rest with `citation doi --write`,
+62/63 carry a Crossref-verified DOI. Resolve the rest with `citation doi --write`,
 then build the bibliography with `citation bib`.
 
 Imported from `artifacts/literature_corpus.jsonl` + 56 upstream citations;
@@ -23,7 +23,7 @@ cards added by research ingest are listed here too.
 | 2.6.8 | [`akahoshi2024`](akahoshi2024.md) | Open Burning Control Barriers | Atmosphere (Q2) | [✓](https://doi.org/10.3390/atmos15111309) |
 | 2.6.9 | [`jainontee2023`](jainontee2023.md) | PM2.5 Strategy, Northern Thailand | Aerosol and Air Quality Research (Q2) | [✓](https://doi.org/10.4209/aaqr.220432) |
 
-## low-cost-sensor-calibration (14)
+## low-cost-sensor-calibration (15)
 
 | id | citekey | paper | journal | doi |
 |---|---|---|---|---|
@@ -41,6 +41,7 @@ cards added by research ingest are listed here too.
 | 2.1.12 | [`hayward2025`](hayward2025.md) | Comprehensive Correction Comparison | npj Climate and Atmospheric Science (Q1) | [✓](https://doi.org/10.1038/s41612-025-01231-5) |
 | 2.1.13 | [`ravindra2024`](ravindra2024.md) | ML for Large Networks, India | npj Climate and Atmospheric Science (Q1) | [✓](https://doi.org/10.1038/s41612-024-00833-9) |
 | 2.1.14 | [`villarrealmarines2024`](villarrealmarines2024.md) | Field Calibration, Semi-Arid Mexico | npj Climate and Atmospheric Science (Q1) | [✓](https://doi.org/10.1038/s41612-024-00837-5) |
+| 2.1.15 | [`nan2026`](nan2026.md) | Multi-Task Calibration Framework | Environment International (Q1) | [✓](https://doi.org/10.1016/j.envint.2025.109981) |
 
 ## multi-source-fusion-qa (6)
 
