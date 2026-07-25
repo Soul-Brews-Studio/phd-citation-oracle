@@ -352,7 +352,7 @@ function paperText(p: Paper): string {
   return [p.title, p.summary, p.thesis_relevance].filter(Boolean).join("\n\n");
 }
 
-// ── status — arra liveness + LanceDB + CF embed, one check ──
+// ── status — root + cards + store + hardware + embedder, one check ──
 
 // Optional liveness check only — arra is NOT on the data path (the store is local
 // files). It must never be able to hang `status`: an unbounded fetch here froze the
@@ -919,7 +919,7 @@ async function readPaperCards(): Promise<Array<Paper & { citekey: string; notes:
   return out;
 }
 
-// ── index — embed the corpus (cards first, JSONL as fallback) into LanceDB ──
+// ── index — embed the corpus (cards first, JSONL as fallback) into the plain-file store ──
 
 type Row = {
   id: string;
