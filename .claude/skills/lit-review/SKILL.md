@@ -1,7 +1,7 @@
 ---
 name: lit-review
-description: Run a literature-review working session end to end — add papers you just found, verify their metadata against Crossref so nothing wrong reaches the bibliography, re-index, then look at the corpus as a map to find gaps and neighbours. Use this whenever someone says "I want to do a literature review", "add these papers and show me the map", "ทำ literature review", "เพิ่ม paper แล้ว visualize", "what's missing from my corpus", "which papers are near this one", "show me the constellation", or hands over a batch of newly-found papers to file. Covers the whole loop — add → verify → index → visualise → gap-hunt — and names the traps that silently corrupt a corpus. For a single paste-in-one-reference job use `paper-card` instead; for absorbing an external AI research report use `research-ingest`.
-argument-hint: "add <doi|title> | visualize [--threshold N] | gaps | check"
+description: Run a literature-review working session end to end, starting from whatever you actually have — a single reference, a list, a full AI research report, or only a TOPIC with no papers yet. For a topic it triages you into getting sources from two independent retrievals and CROSS-CHECKING them against each other before anything becomes a card, because the papers only one source found are where fabrications live. Then verify metadata against Crossref, re-index, and read the corpus as a map to find gaps and neighbours. Use this whenever someone says "I want to do a literature review", "add these papers and show me the map", "ทำ literature review", "เพิ่ม paper แล้ว visualize", "what's missing from my corpus", "which papers are near this one", "show me the constellation", "I only have a topic, where do I start", "หาเปเปอร์เพิ่มให้หน่อย", "ได้ list มาจาก Gemini", "cross check papers", or hands over a batch of newly-found papers to file. Covers the whole loop — add → verify → index → visualise → gap-hunt — and names the traps that silently corrupt a corpus. For a single paste-in-one-reference job use `paper-card` instead; for absorbing an external AI research report use `research-ingest`.
+argument-hint: "add <doi|title> | topic <subject> | crosscheck | visualize [--threshold N] | gaps | check"
 ---
 
 # lit-review — the working loop
@@ -21,6 +21,99 @@ completely plausible. None would have been caught by reading the cards.
 **Prerequisite:** `./bin/citation status` should show a card count and a reachable
 embedder. If the embedder line is missing, `search`/`visualize` cannot run — start one
 (`ollama serve`) or see §"When things go wrong".
+
+---
+
+## 0. What did you actually get? — triage first
+
+What arrives is rarely a clean list. Route it before touching the corpus:
+
+| You have | Do this | Then |
+|---|---|---|
+| **one** reference / DOI / title | §1 below, by hand | §2 verify |
+| **a list** of references | `/paper-card import` — dedupes against the corpus first | §2 verify |
+| **a full report** (prose + bibliography) from Gemini/ChatGPT/Perplexity | `/research-ingest <path>` — files it verbatim with provenance, then verifies every DOI *before* writing a card | §2, then `/research-harvest` |
+| **only a topic**, no papers yet | §0.1 below — go get sources, from **more than one** | §0.2 cross-check |
+
+### 0.1 You have a topic, not a list
+
+Ask the corpus first — you may already own the answer:
+
+```bash
+./bin/citation search "the claim you intend to make, as a full sentence" -k 10
+```
+
+Short 2–3 word queries score badly against a 1024-dim embedding: tiny fragments win on
+cosine for the wrong reasons. Write the actual sentence you want to support.
+
+If the corpus is thin there, get outside sources — and get them from **at least two
+independent retrievals**, because the whole point of the next step is comparing them:
+
+```
+/gemini-deep-research <topic>      # builds the brief; run it in Gemini, save the report
+```
+
+Independent means *different retrieval mechanism*, not just a different prompt. A good
+second source is a real bibliographic index (Scopus, Web of Science, Semantic Scholar)
+or a Crossref query you run yourself:
+
+```bash
+# a second, mechanical retrieval you control — no model in the loop
+curl -s "https://api.crossref.org/works?query.bibliographic=YOUR+TOPIC\
+&filter=from-pub-date:2022-01-01,type:journal-article&rows=20\
+&select=DOI,title,container-title,issued,author&mailto=you@example.com" \
+  | bun -e 'const items=(await Bun.stdin.json()).message.items??[];
+      for(const i of items) console.log(i.DOI, "|", (i.title??[""])[0].slice(0,80));'
+```
+
+### 0.2 Cross-check the sources against each other
+
+**This is the step that earns the second retrieval.** Put the two lists side by side
+before anything becomes a card:
+
+| Bucket | What it means | What to do |
+|---|---|---|
+| **in both** | two independent retrievals agree it exists and is relevant | strongest candidates — verify DOIs, then file |
+| **only in the index** (Scopus/Crossref) | the model missed it | usually real and worth reading — models under-retrieve recent and non-English work |
+| **only in the AI report** | either a genuine find the index query missed, **or invented** | ⚠️ **verify these first, every time** |
+| **in neither** but you expected it | possible gap — or your query was wrong | re-query before concluding anything |
+
+The "only in the AI report" bucket is where fabrications live. On this corpus a Gemini
+report produced exactly that failure: it cited *"Chen, X. et al. — Validation of GeoNEX
+Himawari-8 MAIAC Aerosol Optical Depth"*. **No such paper exists.** The real one is
+She, L., Zhang, H., Wang, W. & Wang, Y. (2019), with a different title — wrong author
+*and* wrong title, on a DOI that was correct all along. It looked completely ordinary.
+
+Also cross-check **the metadata, not just the existence**. When two sources describe the
+same DOI differently, one of them is wrong:
+
+```bash
+# does the corpus already hold it, under a different key?
+./bin/citation search "<paper title>" -k 3
+
+# what does the registration authority say?
+curl -s "https://api.crossref.org/works/<DOI>?mailto=you@example.com" \
+  | bun -e 'const m=(await Bun.stdin.json()).message;
+      console.log((m.title??[""])[0]);
+      console.log((m["container-title"]??[""])[0], m.issued?.["date-parts"]?.[0]?.[0]);
+      console.log((m.author??[]).map(a=>a.family).join(", "));'
+```
+
+Three real traps this catches, all seen on this corpus:
+
+- an **`[Already Catalogued]` marker pointing at the wrong card** — believing it would
+  have written a wrong DOI onto a card that was already correct
+- **a fabricated title bolted to a correct DOI** — nobody had compared the two, and it
+  survived hours of work until a later verification scored the title at 0.33
+- **page numbers read off the DOI's own digits** — `…-00363-w` became "p363" when the
+  real article number is 41
+
+> **A paper both sources miss is not proof it does not exist.** Two failed retrievals are
+> still two retrievals. Before writing "no published work addresses X", run a deliberate
+> negative search in a real index and check the product documentation — see §5.
+
+Once cross-checked, the survivors go through §1 → §2 like anything else. Nothing skips
+verification because it "came from two places".
 
 ---
 
