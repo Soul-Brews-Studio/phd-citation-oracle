@@ -34,6 +34,12 @@ const FONT_SANS = "'Helvetica Neue', Helvetica, 'Segoe UI', Arial, sans-serif";
 
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_MODEL = process.env.CITATION_OLLAMA_MODEL || "bge-m3";
+// Auth for a token-gated remote Ollama (e.g. MDES own infra). Empty = no header (local).
+const OLLAMA_TOKEN = process.env.CITATION_OLLAMA_TOKEN || process.env.OLLAMA_TOKEN || "";
+const ollamaHeaders = (): Record<string, string> => ({
+  "content-type": "application/json",
+  ...(OLLAMA_TOKEN ? { Authorization: `Bearer ${OLLAMA_TOKEN}` } : {}),
+});
 type Backend = "ollama" | "worker" | "cf-rest";
 
 let backendCache: Backend | null = null;
@@ -44,7 +50,7 @@ async function detectBackend(): Promise<Backend> {
   if (forced) return (backendCache = forced);
   // Prefer local: no token, no egress, and on Apple silicon it is GPU-backed.
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetch(`${OLLAMA_URL}/api/tags`, { headers: ollamaHeaders(), signal: AbortSignal.timeout(1500) });
     if (res.ok) {
       const json = (await res.json()) as { models?: Array<{ name?: string }> };
       const has = (json.models ?? []).some((m) => (m.name ?? "").startsWith(OLLAMA_MODEL));
@@ -102,7 +108,7 @@ async function modelMismatchWarning(storeModel: string): Promise<string | null> 
 async function embedViaOllama(texts: string[]): Promise<number[][]> {
   const res = await fetch(`${OLLAMA_URL}/api/embed`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: ollamaHeaders(),
     body: JSON.stringify({ model: OLLAMA_MODEL, input: texts }),
   });
   if (!res.ok) throw new Error(`ollama embed failed: ${res.status} ${await res.text().catch(() => "")}`);
@@ -417,7 +423,7 @@ function hardwareLine(): string {
 /** Is the embedding model actually on the GPU, or has it spilled to CPU? */
 async function ollamaResidency(): Promise<string> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/ps`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetch(`${OLLAMA_URL}/api/ps`, { headers: ollamaHeaders(), signal: AbortSignal.timeout(1500) });
     if (!res.ok) return "";
     const json = (await res.json()) as { models?: Array<{ name?: string; size?: number; size_vram?: number; context_length?: number }> };
     const m = (json.models ?? []).find((x) => (x.name ?? "").startsWith(OLLAMA_MODEL));
@@ -1293,7 +1299,7 @@ type PageStats = {
 };
 type BuiltPage = { html: string; nodeCount: number; topicCount: number; edgeCount: number; stats: PageStats };
 
-async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { error: string }> {
+async function buildConstellationHtml(threshold: number, workerUrl: string = LOCAL_WORKER_URL): Promise<BuiltPage | { error: string }> {
   const store = await storeRead();
   if (!store) return { error: `nothing indexed yet — run "maw citation index" first` };
   // The constellation maps PAPERS. Vault notes may share the index (--vault) but
@@ -1368,7 +1374,7 @@ async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { 
   const data = {
     nodes, edges, vectors,
     colors: colorMap,
-    worker: LOCAL_WORKER_URL,
+    worker: workerUrl,
     model: EMBED_MODEL,
     vw: VW, vh: VH,
     threshold,
@@ -1413,7 +1419,10 @@ async function cmdVisualize(rest: string[]): Promise<PluginResult> {
   const tIdx = rest.indexOf("--threshold");
   const threshold = tIdx >= 0 ? Number(rest[tIdx + 1]) : 0.68;
 
-  const built = await buildConstellationHtml(threshold);
+  // Serve the page same-origin ("" → relative /query-embed) so the browser's live
+  // search calls back to THIS server, which embeds server-side via the configured
+  // backend (e.g. token-gated remote Ollama). No separate embed worker needed.
+  const built = await buildConstellationHtml(threshold, "");
   if ("error" in built) return { ok: false, error: built.error };
 
   // A previous `visualize` often still holds the port; step to the next free one
@@ -1421,7 +1430,29 @@ async function cmdVisualize(rest: string[]): Promise<PluginResult> {
   let served = port;
   for (let attempt = 0; ; attempt++) {
     try {
-      Bun.serve({ port: served, fetch: () => new Response(built.html, { headers: { "content-type": "text/html" } }) });
+      Bun.serve({
+        port: served,
+        fetch: async (req) => {
+          const { pathname } = new URL(req.url);
+          // Live search: embed the query server-side (same backend as `index`/`search`)
+          // and return it in the shape page.html expects ({ data: [vector] }).
+          if (req.method === "POST" && pathname === "/query-embed") {
+            try {
+              const body = (await req.json()) as { text?: string };
+              const text = (body?.text ?? "").trim();
+              if (!text) return Response.json({ error: "empty query" }, { status: 400 });
+              const vectors = await embedTexts([text]);
+              return Response.json({ data: vectors });
+            } catch (error) {
+              return Response.json(
+                { error: error instanceof Error ? error.message : String(error) },
+                { status: 500 },
+              );
+            }
+          }
+          return new Response(built.html, { headers: { "content-type": "text/html" } });
+        },
+      });
       break;
     } catch (error) {
       const busy = String(error).includes("EADDRINUSE") || String(error).includes("in use");
