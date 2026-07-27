@@ -34,6 +34,12 @@ const FONT_SANS = "'Helvetica Neue', Helvetica, 'Segoe UI', Arial, sans-serif";
 
 const OLLAMA_URL = process.env.OLLAMA_URL || "http://localhost:11434";
 const OLLAMA_MODEL = process.env.CITATION_OLLAMA_MODEL || "bge-m3";
+// Auth for a token-gated remote Ollama (e.g. MDES own infra). Empty = no header (local).
+const OLLAMA_TOKEN = process.env.CITATION_OLLAMA_TOKEN || process.env.OLLAMA_TOKEN || "";
+const ollamaHeaders = (): Record<string, string> => ({
+  "content-type": "application/json",
+  ...(OLLAMA_TOKEN ? { Authorization: `Bearer ${OLLAMA_TOKEN}` } : {}),
+});
 type Backend = "ollama" | "worker" | "cf-rest";
 
 let backendCache: Backend | null = null;
@@ -44,7 +50,7 @@ async function detectBackend(): Promise<Backend> {
   if (forced) return (backendCache = forced);
   // Prefer local: no token, no egress, and on Apple silicon it is GPU-backed.
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/tags`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetch(`${OLLAMA_URL}/api/tags`, { headers: ollamaHeaders(), signal: AbortSignal.timeout(1500) });
     if (res.ok) {
       const json = (await res.json()) as { models?: Array<{ name?: string }> };
       const has = (json.models ?? []).some((m) => (m.name ?? "").startsWith(OLLAMA_MODEL));
@@ -102,7 +108,7 @@ async function modelMismatchWarning(storeModel: string): Promise<string | null> 
 async function embedViaOllama(texts: string[]): Promise<number[][]> {
   const res = await fetch(`${OLLAMA_URL}/api/embed`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: ollamaHeaders(),
     body: JSON.stringify({ model: OLLAMA_MODEL, input: texts }),
   });
   if (!res.ok) throw new Error(`ollama embed failed: ${res.status} ${await res.text().catch(() => "")}`);
@@ -417,7 +423,7 @@ function hardwareLine(): string {
 /** Is the embedding model actually on the GPU, or has it spilled to CPU? */
 async function ollamaResidency(): Promise<string> {
   try {
-    const res = await fetch(`${OLLAMA_URL}/api/ps`, { signal: AbortSignal.timeout(1500) });
+    const res = await fetch(`${OLLAMA_URL}/api/ps`, { headers: ollamaHeaders(), signal: AbortSignal.timeout(1500) });
     if (!res.ok) return "";
     const json = (await res.json()) as { models?: Array<{ name?: string; size?: number; size_vram?: number; context_length?: number }> };
     const m = (json.models ?? []).find((x) => (x.name ?? "").startsWith(OLLAMA_MODEL));
