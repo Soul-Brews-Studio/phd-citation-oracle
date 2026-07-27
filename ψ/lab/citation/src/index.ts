@@ -1299,7 +1299,7 @@ type PageStats = {
 };
 type BuiltPage = { html: string; nodeCount: number; topicCount: number; edgeCount: number; stats: PageStats };
 
-async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { error: string }> {
+async function buildConstellationHtml(threshold: number, workerUrl: string = LOCAL_WORKER_URL): Promise<BuiltPage | { error: string }> {
   const store = await storeRead();
   if (!store) return { error: `nothing indexed yet — run "maw citation index" first` };
   // The constellation maps PAPERS. Vault notes may share the index (--vault) but
@@ -1374,7 +1374,7 @@ async function buildConstellationHtml(threshold: number): Promise<BuiltPage | { 
   const data = {
     nodes, edges, vectors,
     colors: colorMap,
-    worker: LOCAL_WORKER_URL,
+    worker: workerUrl,
     model: EMBED_MODEL,
     vw: VW, vh: VH,
     threshold,
@@ -1419,7 +1419,10 @@ async function cmdVisualize(rest: string[]): Promise<PluginResult> {
   const tIdx = rest.indexOf("--threshold");
   const threshold = tIdx >= 0 ? Number(rest[tIdx + 1]) : 0.68;
 
-  const built = await buildConstellationHtml(threshold);
+  // Serve the page same-origin ("" → relative /query-embed) so the browser's live
+  // search calls back to THIS server, which embeds server-side via the configured
+  // backend (e.g. token-gated remote Ollama). No separate embed worker needed.
+  const built = await buildConstellationHtml(threshold, "");
   if ("error" in built) return { ok: false, error: built.error };
 
   // A previous `visualize` often still holds the port; step to the next free one
@@ -1427,7 +1430,29 @@ async function cmdVisualize(rest: string[]): Promise<PluginResult> {
   let served = port;
   for (let attempt = 0; ; attempt++) {
     try {
-      Bun.serve({ port: served, fetch: () => new Response(built.html, { headers: { "content-type": "text/html" } }) });
+      Bun.serve({
+        port: served,
+        fetch: async (req) => {
+          const { pathname } = new URL(req.url);
+          // Live search: embed the query server-side (same backend as `index`/`search`)
+          // and return it in the shape page.html expects ({ data: [vector] }).
+          if (req.method === "POST" && pathname === "/query-embed") {
+            try {
+              const body = (await req.json()) as { text?: string };
+              const text = (body?.text ?? "").trim();
+              if (!text) return Response.json({ error: "empty query" }, { status: 400 });
+              const vectors = await embedTexts([text]);
+              return Response.json({ data: vectors });
+            } catch (error) {
+              return Response.json(
+                { error: error instanceof Error ? error.message : String(error) },
+                { status: 500 },
+              );
+            }
+          }
+          return new Response(built.html, { headers: { "content-type": "text/html" } });
+        },
+      });
       break;
     } catch (error) {
       const busy = String(error).includes("EADDRINUSE") || String(error).includes("in use");
