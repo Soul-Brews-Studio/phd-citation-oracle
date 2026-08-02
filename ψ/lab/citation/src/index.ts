@@ -111,6 +111,26 @@ async function embedViaOllama(texts: string[]): Promise<number[][]> {
   return json.embeddings;
 }
 
+/**
+ * Cloudflare auth headers — mirrors arra-oracle-v3's dual-auth adapter.
+ *   Global API Key (cfk_* / CLOUDFLARE_AUTH_MODE=global_key) -> X-Auth-Email + X-Auth-Key
+ *   API tokens (cfat_* / anything else)                      -> Authorization: Bearer
+ * Bearer-only breaks Global API Key accounts with 401 Invalid API Token.
+ */
+function cfAuthHeaders(): Record<string, string> {
+  const token = process.env.CF_API_TOKEN || "";
+  const email = process.env.CF_EMAIL || process.env.CLOUDFLARE_EMAIL || "";
+  const mode = (process.env.CF_AUTH_MODE || process.env.CLOUDFLARE_AUTH_MODE || "").trim().toLowerCase();
+  const isGlobalKey = mode === "global_key" || token.startsWith("cfk_");
+  if (isGlobalKey) {
+    if (!email) {
+      throw new Error("CF_EMAIL (or CLOUDFLARE_EMAIL) required when using a Global API Key or CF_AUTH_MODE=global_key");
+    }
+    return { "X-Auth-Email": email, "X-Auth-Key": token };
+  }
+  return { Authorization: `Bearer ${token}` };
+}
+
 async function embedTexts(texts: string[]): Promise<number[][]> {
   const backend = await detectBackend();
   if (backend === "ollama") return embedViaOllama(texts);
@@ -118,7 +138,7 @@ async function embedTexts(texts: string[]): Promise<number[][]> {
     const url = `https://api.cloudflare.com/client/v4/accounts/${process.env.CF_ACCOUNT_ID}/ai/run/${EMBED_MODEL}`;
     const res = await fetch(url, {
       method: "POST",
-      headers: { Authorization: `Bearer ${process.env.CF_API_TOKEN}`, "content-type": "application/json" },
+      headers: { ...cfAuthHeaders(), "content-type": "application/json" },
       body: JSON.stringify({ text: texts }),
     });
     if (!res.ok) throw new Error(`Cloudflare REST embed failed: ${res.status}`);
